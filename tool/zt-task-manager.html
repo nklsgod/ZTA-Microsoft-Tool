@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZT Workshop Task Manager</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #d7dbe0;
+    --text: #1b1f24;
+    --muted: #5b6470;
+    --accent: #2563eb;
+    --accent-contrast: #ffffff;
+    --chip-bg: #eef1f5;
+    --chip-active-bg: #2563eb;
+    --chip-active-text: #ffffff;
+    --danger: #b3261e;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    padding: 20px 24px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0 0 4px; font-size: 20px; }
+  header p { margin: 6px 0 0; color: var(--muted); max-width: 900px; line-height: 1.4; }
+  header p:first-of-type { margin-top: 0; }
+  main { padding: 20px 24px 60px; max-width: 1500px; margin: 0 auto; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  #dropzone {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    transition: border-color .15s, background .15s;
+  }
+  #dropzone.dragover { border-color: var(--accent); background: #eef4ff; }
+  #dropzone .hint { color: var(--muted); }
+  #fileStatus { font-weight: 600; }
+  #fileError { color: var(--danger); font-weight: 600; }
+
+  button, .btn {
+    font: inherit;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    padding: 7px 14px;
+    border-radius: var(--radius);
+    cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+    font-weight: 600;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(0.97); }
+
+  .filter-row { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+  .filter-group { min-width: 190px; }
+  .filter-group h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .chip-group { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--chip-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 10px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  .chip.active { background: var(--chip-active-bg); border-color: var(--chip-active-bg); color: var(--chip-active-text); }
+  .chip.status-blocked.active { background: #b3261e; border-color: #b3261e; }
+
+  #searchBox { padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius); font: inherit; width: 200px; }
+
+  .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+  #summary { color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel); }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { position: sticky; top: 0; background: var(--panel); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+  tbody tr:hover { background: #fafbfc; }
+  td.taskid { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+
+  select, textarea, input[type=text] {
+    font: inherit;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    width: 100%;
+  }
+  textarea { resize: vertical; min-height: 44px; }
+
+  .status-badge, .priority-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .status-blocked { background: #fbe3e1; color: #8c1d17; }
+  .status-completed { background: #dff3e3; color: #1e6b32; }
+  .status-in-progress { background: #dceafd; color: #1447a3; }
+  .status-not-started { background: #eceef1; color: #444; }
+  .status-planned { background: #fdf1d6; color: #8a5b00; }
+  .status-in-planning { background: #fdf1d6; color: #8a5b00; }
+  .status-will-not-pursue, .status-declined { background: #eceef1; color: #666; text-decoration: line-through; }
+  .status-not-applicable { background: #eceef1; color: #888; }
+  .status-not-reviewed { background: #eceef1; color: #666; }
+  .status-first-party-other, .status-third-party, .status-ms-roadmap, .status-follow-up { background: #efe6fb; color: #5b2a99; }
+
+  .tags-cell { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 160px; }
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #eef1f5; border: 1px solid var(--border); border-radius: 999px;
+    padding: 2px 6px 2px 9px; font-size: 12px;
+  }
+  .tag-chip button.remove-tag {
+    border: none; background: none; padding: 0 2px; cursor: pointer; color: var(--muted); font-size: 13px; line-height: 1;
+  }
+  .tag-add-input { width: 90px; font-size: 12px; padding: 3px 6px; }
+
+  .team-cell { display: flex; flex-direction: column; gap: 5px; min-width: 200px; }
+  .team-field { display: flex; align-items: center; gap: 6px; }
+  .team-field label { flex: 0 0 62px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .02em; }
+  .team-field input, .team-field select { font-size: 12.5px; padding: 3px 6px; }
+  .link-open { font-size: 11.5px; align-self: flex-end; }
+
+  .notes-cell textarea { font-size: 12.5px; }
+  .notes-cell.inactive textarea { opacity: .5; }
+  .notes-cell .hint { font-size: 11px; color: var(--muted); }
+  .notes-len { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .notes-len.over { color: var(--danger); font-weight: 600; }
+
+  footer { color: var(--muted); font-size: 12px; margin-top: 24px; line-height: 1.5; }
+  code { background: #eceef1; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ZT Workshop Task Manager</h1>
+  <p>
+    Load a <code>zt-framework-config-*.json</code> export from
+    <a href="https://zerotrust.microsoft.com/" target="_blank" rel="noopener">zerotrust.microsoft.com</a>,
+    filter by status/priority/team/tags, edit them, then export a file that re-imports cleanly into the official
+    tool. Everything runs locally in this browser tab &mdash; nothing is uploaded anywhere.
+  </p>
+  <p>
+    Team priority, team, feature number, link, and tags are parsed from each task's existing <code>notes</code> text
+    using the format <code>Status | Prio 1-3 | Team | FeatureNr | Link #tag</code> (e.g.
+    <code>Status | Prio 3 | SAM2 | xyz123 | https://test.com #1337</code>) &mdash; the convention already in use,
+    not something invented by this tool. "Team priority" (1-3) is separate from the official Priority field below.
+  </p>
+</header>
+
+<main>
+
+  <section class="panel" id="dropzone">
+    <input type="file" id="fileInput" accept="application/json,.json">
+    <span class="hint">or drag &amp; drop a <code>.json</code> export here</span>
+    <span id="fileStatus"></span>
+    <span id="fileError"></span>
+  </section>
+
+  <section class="panel" id="filters" style="display:none;">
+    <div class="filter-row">
+      <div class="filter-group">
+        <h3>Status</h3>
+        <div class="chip-group" id="statusChips"></div>
+      </div>
+      <div class="filter-group">
+        <h3>Priority</h3>
+        <div class="chip-group" id="priorityChips"></div>
+      </div>
+      <div class="filter-group">
+        <h3>Team priority</h3>
+        <div class="chip-group" id="teamPriorityChips"></div>
+      </div>
+      <div class="filter-group">
+        <h3>Team</h3>
+        <div class="chip-group" id="teamChips"></div>
+      </div>
+      <div class="filter-group" style="flex:1; min-width:220px;">
+        <h3>Tags</h3>
+        <div class="chip-group" id="tagChips"></div>
+      </div>
+      <div class="filter-group">
+        <h3>Task ID search</h3>
+        <input type="text" id="searchBox" placeholder="e.g. RMI_">
+      </div>
+    </div>
+  </section>
+
+  <div class="toolbar" id="toolbar" style="display:none;">
+    <div id="summary"></div>
+    <div style="display:flex; gap:8px;">
+      <button id="clearFiltersBtn">Clear filters</button>
+      <button class="primary" id="exportBtn" disabled>Export updated JSON</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:0; overflow-x:auto; display:none;" id="tableWrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Pillar</th>
+          <th>Task ID</th>
+          <th>Status</th>
+          <th>Priority</th>
+          <th>Team prio / Team / Feature / Link</th>
+          <th>Tags</th>
+          <th>Notes (freeform fallback)</th>
+          <th>Last modified</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <footer>
+    Custom fields are parsed from &amp; written back into each task's existing <code>notes</code> field &mdash; a
+    plain string the official importer already accepts &mdash; so everything travels with the file and stays visible
+    even if someone opens it directly in the official app. The "Notes (freeform fallback)" column only applies when
+    Team priority/Team/Feature/Link are all empty for that row; as soon as any of those are filled in, the note is
+    written in the <code>Status | Prio N | Team | FeatureNr | Link #tag</code> format instead. This tool only edits
+    task overrides that are already present in the loaded file; to start tracking a brand-new task, set its status
+    once in the official app, re-export, then continue here.
+  </footer>
+
+</main>
+
+<script src="zt-shared.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var STATUS_VALUES = ZTShared.STATUS_VALUES;
+  var PRIORITY_VALUES = ZTShared.PRIORITY_VALUES;
+  var TEAM_PRIORITY_VALUES = ZTShared.TEAM_PRIORITY_VALUES;
+  var NOTES_SOFT_CAP = ZTShared.NOTES_SOFT_CAP;
+  var labelize = ZTShared.labelize;
+  var nowIso = ZTShared.nowIso;
+  var filenameTimestamp = ZTShared.filenameTimestamp;
+  var parseNotes = ZTShared.parseNotes;
+  var composeNotes = ZTShared.composeNotes;
+
+  var doc = null;          // the full parsed JSON document, mutated in place as the user edits
+  var rows = [];           // flattened view, see loadRowsFromDoc()
+  var statusFilter = new Set();
+  var priorityFilter = new Set();
+  var teamPriorityFilter = new Set();
+  var teamFilter = new Set();
+  var tagsFilter = new Set();
+
+  var fileInput = document.getElementById("fileInput");
+  var dropzone = document.getElementById("dropzone");
+  var fileStatus = document.getElementById("fileStatus");
+  var fileError = document.getElementById("fileError");
+  var filtersSection = document.getElementById("filters");
+  var toolbar = document.getElementById("toolbar");
+  var tableWrap = document.getElementById("tableWrap");
+  var tableBody = document.getElementById("tableBody");
+  var statusChipsEl = document.getElementById("statusChips");
+  var priorityChipsEl = document.getElementById("priorityChips");
+  var teamPriorityChipsEl = document.getElementById("teamPriorityChips");
+  var teamChipsEl = document.getElementById("teamChips");
+  var tagChipsEl = document.getElementById("tagChips");
+  var searchBox = document.getElementById("searchBox");
+  var summaryEl = document.getElementById("summary");
+  var exportBtn = document.getElementById("exportBtn");
+  var clearFiltersBtn = document.getElementById("clearFiltersBtn");
+
+  // --- load ------------------------------------------------------------------
+
+  function handleFile(file) {
+    fileError.textContent = "";
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var parsed;
+      try {
+        parsed = JSON.parse(reader.result);
+      } catch (e) {
+        fileError.textContent = "Could not parse this file as JSON: " + e.message;
+        return;
+      }
+      if (!parsed || !parsed.configuration || !parsed.configuration.pillars) {
+        fileError.textContent = "This doesn't look like a Zero Trust Workshop config export " +
+          "(expected configuration.pillars).";
+        return;
+      }
+      doc = parsed;
+      fileStatus.textContent = "Loaded: " + file.name;
+      loadRowsFromDoc();
+      buildFilterChips();
+      renderTable();
+      filtersSection.style.display = "";
+      toolbar.style.display = "";
+      tableWrap.style.display = "";
+      exportBtn.disabled = false;
+    };
+    reader.onerror = function () {
+      fileError.textContent = "Could not read this file.";
+    };
+    reader.readAsText(file);
+  }
+
+  function loadRowsFromDoc() {
+    rows = [];
+    var pillars = doc.configuration.pillars;
+    Object.keys(pillars).forEach(function (pillarKey) {
+      var overrides = (pillars[pillarKey] && pillars[pillarKey].taskOverrides) || {};
+      Object.keys(overrides).forEach(function (taskId) {
+        var ov = overrides[taskId];
+        var parsed = parseNotes(ov.notes);
+        rows.push({
+          pillarKey: pillarKey,
+          taskId: taskId,
+          ref: ov,
+          status: ov.status || "",
+          priority: ov.priority || "",
+          legend: parsed.legend,
+          teamPriority: parsed.teamPriority,
+          team: parsed.team,
+          featureNr: parsed.featureNr,
+          link: parsed.link,
+          tags: parsed.tags,
+          freeText: parsed.freeText
+        });
+      });
+    });
+    rows.sort(function (a, b) {
+      return a.pillarKey === b.pillarKey
+        ? a.taskId.localeCompare(b.taskId)
+        : a.pillarKey.localeCompare(b.pillarKey);
+    });
+  }
+
+  // --- writing edits back into doc --------------------------------------------
+
+  function isStructured(row) {
+    return !!(row.teamPriority || row.team || row.featureNr || row.link);
+  }
+
+  function touch(row) {
+    row.ref.status = row.status;
+    if (row.priority) row.ref.priority = row.priority; else delete row.ref.priority;
+    row.ref.notes = composeNotes({
+      structured: isStructured(row),
+      legend: row.legend,
+      teamPriority: row.teamPriority,
+      team: row.team,
+      featureNr: row.featureNr,
+      link: row.link,
+      tags: row.tags,
+      freeText: row.freeText
+    });
+    row.ref.lastModified = nowIso();
+  }
+
+  // --- filter chip UI ----------------------------------------------------------
+
+  function makeChip(container, value, label, activeSet, extraClass) {
+    var chip = document.createElement("span");
+    chip.className = "chip" + (extraClass ? " " + extraClass : "");
+    chip.textContent = label;
+    chip.dataset.value = value;
+    if (activeSet.has(value)) chip.classList.add("active");
+    chip.addEventListener("click", function () {
+      if (activeSet.has(value)) activeSet.delete(value); else activeSet.add(value);
+      chip.classList.toggle("active");
+      renderTable();
+    });
+    container.appendChild(chip);
+  }
+
+  function buildFilterChips() {
+    statusChipsEl.innerHTML = "";
+    STATUS_VALUES.forEach(function (s) {
+      makeChip(statusChipsEl, s, labelize(s), statusFilter, "status-" + s);
+    });
+
+    priorityChipsEl.innerHTML = "";
+    PRIORITY_VALUES.concat(["none"]).forEach(function (p) {
+      makeChip(priorityChipsEl, p, p === "none" ? "No priority" : p, priorityFilter);
+    });
+
+    teamPriorityChipsEl.innerHTML = "";
+    TEAM_PRIORITY_VALUES.concat(["none"]).forEach(function (p) {
+      makeChip(teamPriorityChipsEl, p, p === "none" ? "No team prio" : p, teamPriorityFilter);
+    });
+
+    rebuildTeamChips();
+    rebuildTagChips();
+  }
+
+  function allKnownValues(field) {
+    var set = new Set();
+    rows.forEach(function (r) { if (r[field]) set.add(r[field]); });
+    return Array.from(set).sort();
+  }
+
+  function allKnownTags() {
+    var set = new Set();
+    rows.forEach(function (r) { r.tags.forEach(function (t) { set.add(t); }); });
+    return Array.from(set).sort();
+  }
+
+  function rebuildTeamChips() {
+    teamChipsEl.innerHTML = "";
+    var known = allKnownValues("team");
+    if (!known.length) {
+      var hint = document.createElement("span");
+      hint.className = "hint";
+      hint.textContent = "No teams yet.";
+      teamChipsEl.appendChild(hint);
+      return;
+    }
+    known.forEach(function (t) { makeChip(teamChipsEl, t, t, teamFilter); });
+  }
+
+  function rebuildTagChips() {
+    tagChipsEl.innerHTML = "";
+    var known = allKnownTags();
+    if (!known.length) {
+      var hint = document.createElement("span");
+      hint.className = "hint";
+      hint.textContent = "No tags yet — add one on any row below.";
+      tagChipsEl.appendChild(hint);
+      return;
+    }
+    known.forEach(function (t) {
+      makeChip(tagChipsEl, t, t, tagsFilter);
+    });
+  }
+
+  searchBox.addEventListener("input", renderTable);
+
+  clearFiltersBtn.addEventListener("click", function () {
+    statusFilter.clear();
+    priorityFilter.clear();
+    teamPriorityFilter.clear();
+    teamFilter.clear();
+    tagsFilter.clear();
+    searchBox.value = "";
+    buildFilterChips();
+    renderTable();
+  });
+
+  // --- table rendering ----------------------------------------------------------
+
+  function rowMatches(row) {
+    if (statusFilter.size && !statusFilter.has(row.status)) return false;
+    if (priorityFilter.size) {
+      var p = row.priority || "none";
+      if (!priorityFilter.has(p)) return false;
+    }
+    if (teamPriorityFilter.size) {
+      var tp = row.teamPriority || "none";
+      if (!teamPriorityFilter.has(tp)) return false;
+    }
+    if (teamFilter.size && !teamFilter.has(row.team)) return false;
+    if (tagsFilter.size) {
+      var hasAny = row.tags.some(function (t) { return tagsFilter.has(t); });
+      if (!hasAny) return false;
+    }
+    var search = searchBox.value.trim().toLowerCase();
+    if (search && row.taskId.toLowerCase().indexOf(search) === -1) return false;
+    return true;
+  }
+
+  function buildSelect(values, current, labelFn, onChange) {
+    var sel = document.createElement("select");
+    var blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "—";
+    sel.appendChild(blank);
+    values.forEach(function (v) {
+      var opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = labelFn ? labelFn(v) : v;
+      if (v === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener("change", function () { onChange(sel.value); });
+    return sel;
+  }
+
+  function buildTagsCell(row) {
+    var cell = document.createElement("div");
+    cell.className = "tags-cell";
+
+    row.tags.forEach(function (tag) {
+      var chip = document.createElement("span");
+      chip.className = "tag-chip";
+      var label = document.createElement("span");
+      label.textContent = tag;
+      chip.appendChild(label);
+      var removeBtn = document.createElement("button");
+      removeBtn.className = "remove-tag";
+      removeBtn.textContent = "×";
+      removeBtn.title = "Remove tag";
+      removeBtn.addEventListener("click", function () {
+        row.tags = row.tags.filter(function (t) { return t !== tag; });
+        touch(row);
+        rebuildTagChips();
+        renderTable();
+      });
+      chip.appendChild(removeBtn);
+      cell.appendChild(chip);
+    });
+
+    var input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "+ tag";
+    input.className = "tag-add-input";
+    input.setAttribute("list", "known-tags");
+    function commit() {
+      var val = input.value.trim().replace(/^#/, "");
+      if (!val) return;
+      if (row.tags.indexOf(val) === -1) row.tags.push(val);
+      touch(row);
+      input.value = "";
+      rebuildTagChips();
+      renderTable();
+    }
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); commit(); }
+    });
+    input.addEventListener("blur", commit);
+    cell.appendChild(input);
+
+    return cell;
+  }
+
+  function buildTeamField(labelText, value, listId, onChange) {
+    var row = document.createElement("div");
+    row.className = "team-field";
+    var label = document.createElement("label");
+    label.textContent = labelText;
+    row.appendChild(label);
+    var input = document.createElement("input");
+    input.type = "text";
+    input.value = value || "";
+    if (listId) input.setAttribute("list", listId);
+    input.addEventListener("change", function () { onChange(input.value.trim()); });
+    row.appendChild(input);
+    return row;
+  }
+
+  function buildTeamCell(row) {
+    var cell = document.createElement("div");
+    cell.className = "team-cell";
+
+    var prioField = document.createElement("div");
+    prioField.className = "team-field";
+    var prioLabel = document.createElement("label");
+    prioLabel.textContent = "Prio";
+    prioField.appendChild(prioLabel);
+    prioField.appendChild(buildSelect(TEAM_PRIORITY_VALUES, row.teamPriority, null, function (val) {
+      row.teamPriority = val;
+      touch(row);
+      renderTable();
+    }));
+    cell.appendChild(prioField);
+
+    cell.appendChild(buildTeamField("Team", row.team, "known-teams", function (val) {
+      row.team = val;
+      touch(row);
+      rebuildTeamChips();
+      renderTable();
+    }));
+    cell.appendChild(buildTeamField("Feature #", row.featureNr, null, function (val) {
+      row.featureNr = val;
+      touch(row);
+      renderTable();
+    }));
+    cell.appendChild(buildTeamField("Link", row.link, null, function (val) {
+      row.link = val;
+      touch(row);
+      renderTable();
+    }));
+
+    if (row.link) {
+      var open = document.createElement("a");
+      open.className = "link-open";
+      open.href = row.link;
+      open.target = "_blank";
+      open.rel = "noopener";
+      open.textContent = "Open ↗";
+      cell.appendChild(open);
+    }
+
+    return cell;
+  }
+
+  function buildNotesCell(row) {
+    var cell = document.createElement("div");
+    cell.className = "notes-cell";
+    var structured = isStructured(row);
+    cell.classList.toggle("inactive", structured);
+
+    var textarea = document.createElement("textarea");
+    textarea.value = row.freeText;
+    textarea.addEventListener("change", function () {
+      row.freeText = textarea.value;
+      touch(row);
+      updateLenLabel();
+    });
+    cell.appendChild(textarea);
+
+    if (structured) {
+      var hint = document.createElement("div");
+      hint.className = "hint";
+      hint.textContent = "Unused while Team prio/Team/Feature/Link are set above.";
+      cell.appendChild(hint);
+    }
+
+    var lenLabel = document.createElement("div");
+    lenLabel.className = "notes-len";
+    function updateLenLabel() {
+      var combined = row.ref.notes || "";
+      lenLabel.textContent = combined.length + " / " + NOTES_SOFT_CAP + " chars";
+      lenLabel.classList.toggle("over", combined.length > NOTES_SOFT_CAP);
+    }
+    updateLenLabel();
+    cell.appendChild(lenLabel);
+    return cell;
+  }
+
+  function renderTable() {
+    // keep the shared <datalist>s in sync for the tag/team inputs' autocomplete
+    [["known-tags", allKnownTags()], ["known-teams", allKnownValues("team")]].forEach(function (pair) {
+      var id = pair[0], values = pair[1];
+      var datalist = document.getElementById(id);
+      if (!datalist) {
+        datalist = document.createElement("datalist");
+        datalist.id = id;
+        document.body.appendChild(datalist);
+      }
+      datalist.innerHTML = "";
+      values.forEach(function (v) {
+        var opt = document.createElement("option");
+        opt.value = v;
+        datalist.appendChild(opt);
+      });
+    });
+
+    var visible = rows.filter(rowMatches);
+    summaryEl.textContent = "Showing " + visible.length + " of " + rows.length + " tracked tasks";
+
+    tableBody.innerHTML = "";
+    visible.forEach(function (row) {
+      var tr = document.createElement("tr");
+
+      var pillarTd = document.createElement("td");
+      pillarTd.textContent = labelize(row.pillarKey);
+      tr.appendChild(pillarTd);
+
+      var idTd = document.createElement("td");
+      idTd.className = "taskid";
+      idTd.textContent = row.taskId;
+      tr.appendChild(idTd);
+
+      var statusTd = document.createElement("td");
+      var statusBadge = document.createElement("span");
+      statusBadge.className = "status-badge status-" + (row.status || "not-reviewed");
+      statusBadge.textContent = labelize(row.status || "not-reviewed");
+      var statusSelect = buildSelect(STATUS_VALUES, row.status, labelize, function (val) {
+        row.status = val;
+        touch(row);
+        renderTable();
+      });
+      statusTd.appendChild(statusBadge);
+      statusTd.appendChild(statusSelect);
+      tr.appendChild(statusTd);
+
+      var priorityTd = document.createElement("td");
+      var prioritySelect = buildSelect(PRIORITY_VALUES, row.priority, null, function (val) {
+        row.priority = val;
+        touch(row);
+        renderTable();
+      });
+      priorityTd.appendChild(prioritySelect);
+      tr.appendChild(priorityTd);
+
+      var teamTd = document.createElement("td");
+      teamTd.appendChild(buildTeamCell(row));
+      tr.appendChild(teamTd);
+
+      var tagsTd = document.createElement("td");
+      tagsTd.appendChild(buildTagsCell(row));
+      tr.appendChild(tagsTd);
+
+      var notesTd = document.createElement("td");
+      notesTd.appendChild(buildNotesCell(row));
+      tr.appendChild(notesTd);
+
+      var lastModTd = document.createElement("td");
+      lastModTd.textContent = row.ref.lastModified ? row.ref.lastModified.slice(0, 10) : "";
+      tr.appendChild(lastModTd);
+
+      tableBody.appendChild(tr);
+    });
+  }
+
+  // --- export ------------------------------------------------------------------
+
+  function recomputeStatistics() {
+    var modifiedTasks = 0, completedTasks = 0, inProgressTasks = 0, plannedTasks = 0;
+    var pillarsWithChanges = [];
+    Object.keys(doc.configuration.pillars).forEach(function (pillarKey) {
+      var overrides = (doc.configuration.pillars[pillarKey] && doc.configuration.pillars[pillarKey].taskOverrides) || {};
+      var taskIds = Object.keys(overrides);
+      if (taskIds.length) pillarsWithChanges.push(pillarKey);
+      taskIds.forEach(function (taskId) {
+        modifiedTasks++;
+        var status = overrides[taskId].status;
+        if (status === "completed") completedTasks++;
+        else if (status === "in-progress") inProgressTasks++;
+        else if (status === "planned") plannedTasks++;
+      });
+    });
+    doc.statistics = doc.statistics || {};
+    doc.statistics.modifiedTasks = modifiedTasks;
+    doc.statistics.completedTasks = completedTasks;
+    doc.statistics.inProgressTasks = inProgressTasks;
+    doc.statistics.plannedTasks = plannedTasks;
+    doc.statistics.pillarsWithChanges = pillarsWithChanges;
+  }
+
+  exportBtn.addEventListener("click", function () {
+    if (!doc) return;
+    recomputeStatistics();
+    var ts = nowIso();
+    doc.metadata.exportedAt = ts;
+    if (doc.configuration.applicationState) doc.configuration.applicationState.lastModified = ts;
+
+    var blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "zt-framework-config-all-" + filenameTimestamp(new Date(ts)) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  // --- file input / drag & drop -------------------------------------------------
+
+  fileInput.addEventListener("change", function () {
+    if (fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+
+  ["dragenter", "dragover"].forEach(function (evt) {
+    dropzone.addEventListener(evt, function (e) {
+      e.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (evt) {
+    dropzone.addEventListener(evt, function (e) {
+      e.preventDefault();
+      dropzone.classList.remove("dragover");
+    });
+  });
+  dropzone.addEventListener("drop", function (e) {
+    var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+})();
+</script>
+
+</body>
+</html>

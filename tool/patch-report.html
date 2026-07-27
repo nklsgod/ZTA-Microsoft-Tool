@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZT Workshop Report Patcher</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #fff; --border: #d7dbe0; --text: #1b1f24; --muted: #5b6470;
+    --accent: #2563eb; --accent-contrast: #fff; --danger: #b3261e; --radius: 6px;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif; background:var(--bg); color:var(--text); font-size:14px; }
+  header { padding:20px 24px 12px; background:var(--panel); border-bottom:1px solid var(--border); }
+  header h1 { margin:0 0 4px; font-size:20px; }
+  header p { margin:6px 0 0; color:var(--muted); max-width:900px; line-height:1.5; }
+  main { padding:20px 24px 60px; max-width:1000px; margin:0 auto; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px; margin-bottom:16px; }
+  .dropzone { border:2px dashed var(--border); border-radius:var(--radius); padding:16px; transition:border-color .15s, background .15s; }
+  .dropzone.dragover { border-color:var(--accent); background:#eef4ff; }
+  .dropzone h3 { margin:0 0 8px; font-size:14px; }
+  .dropzone .hint { color:var(--muted); font-size:12.5px; }
+  .file-status { font-weight:600; margin-top:6px; }
+  .file-status.pending { color:var(--muted); font-weight:400; }
+  .two-col { display:flex; gap:16px; flex-wrap:wrap; }
+  .two-col > .dropzone { flex:1 1 320px; }
+  button { font:inherit; border:1px solid var(--border); background:var(--panel); color:var(--text); padding:8px 16px; border-radius:var(--radius); cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-contrast); font-weight:600; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  #log { font-family: ui-monospace, Consolas, monospace; font-size:12.5px; white-space:pre-wrap; }
+  #log .log-error { color:var(--danger); font-weight:600; }
+  #log .log-line { color:var(--text); margin:2px 0; }
+  footer { color:var(--muted); font-size:12px; margin-top:24px; line-height:1.6; }
+  code { background:#eceef1; padding:1px 5px; border-radius:3px; }
+  ul.limits { margin: 6px 0 0 18px; padding:0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ZT Workshop Report Patcher</h1>
+  <p>
+    Merges your team's status/priority/tag edits (from a <code>zt-framework-config-*.json</code> export, e.g. one
+    produced or edited with <em>zt-task-manager.html</em>) into a copy of your downloaded
+    <code>Zero Trust Workshop - Progress Report.htm</code> &mdash; adding a status/priority/tag filter bar directly
+    inside the report. Nothing is uploaded anywhere and your original files are never modified; this produces a new
+    file to download.
+  </p>
+  <p>
+    <strong>Scope:</strong> the report your team downloads doesn't include its original stylesheet/script files, so
+    it normally opens unstyled and non-interactive. Most of the report's colors are actually already baked into the
+    HTML as inline styles (Microsoft just didn't ship the layout CSS alongside the plain download), so this patch
+    supplies matching layout CSS &mdash; header, roadmap cards, status colors, progress bars &mdash; to bring it back
+    close to the original look, restores the collapsed/expand behavior for the pillar task lists, and adds the new
+    status/priority/tag filter bar on top.
+  </p>
+</header>
+
+<main>
+
+  <section class="panel two-col">
+    <div class="dropzone" id="reportZone">
+      <h3>1. Report HTML</h3>
+      <input type="file" id="reportInput" accept=".htm,.html,text/html">
+      <div class="hint">The "Zero Trust Workshop - Progress Report.htm" your team downloads.</div>
+      <div class="file-status pending" id="reportStatus">No file loaded yet</div>
+    </div>
+    <div class="dropzone" id="configZone">
+      <h3>2. Config JSON</h3>
+      <input type="file" id="configInput" accept=".json,application/json">
+      <div class="hint">The <code>zt-framework-config-*.json</code> export with your team's status/priority/tags.</div>
+      <div class="file-status pending" id="configStatus">No file loaded yet</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <button class="primary" id="generateBtn" disabled>Generate merged report</button>
+    <div id="log" style="margin-top:12px;"></div>
+  </section>
+
+  <footer>
+    How this survives the round trip: team priority/team/feature number/link/tags are all parsed out of each task's
+    existing <code>notes</code> field using the <code>Status | Prio N | Team | FeatureNr | Link #tag</code> format
+    &mdash; a plain string the official importer already accepts. This patcher reads that JSON, matches each task by
+    its Task ID + pillar to the corresponding item in the report, and updates that item's status badge and adds
+    priority/team/tag chips + a new filter bar. The report keeps a strict Content-Security-Policy (no
+    <code>unsafe-inline</code> scripts); the injected filter logic is instead allowlisted by its exact SHA-256 hash,
+    computed automatically each time you generate a file, so the page's script security isn't weakened.
+    <ul class="limits">
+      <li>Only tasks already present as overrides in your JSON are updated; tasks never touched in either tool keep
+        whatever status the report already showed.</li>
+      <li>Workshop Notes is rebuilt entirely from the JSON's notes/tags &mdash; live, not frozen at export time.
+        A "Blocked tasks" risk card is added the same way. The report's other Top Risks cards (completion
+        percentages, unstarted P0 counts) are left as the original export's snapshot, since computing those
+        accurately needs the full task catalog/priority list, which isn't available outside the official tool.</li>
+      <li>The "Filter by Pillar" buttons are restored, scoped to the Implementation Roadmap section; the summary
+        cards (Task Summary, Status Distribution) still show all pillars regardless of that filter.</li>
+      <li>Re-running this on an already-patched report is blocked &mdash; always start from a fresh export.</li>
+    </ul>
+  </footer>
+
+</main>
+
+<script src="zt-shared.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var reportText = null, reportFilename = null;
+  var configDoc = null, configFilename = null;
+
+  var reportInput = document.getElementById("reportInput");
+  var configInput = document.getElementById("configInput");
+  var reportZone = document.getElementById("reportZone");
+  var configZone = document.getElementById("configZone");
+  var reportStatus = document.getElementById("reportStatus");
+  var configStatus = document.getElementById("configStatus");
+  var generateBtn = document.getElementById("generateBtn");
+  var logEl = document.getElementById("log");
+
+  function clearLog() { logEl.innerHTML = ""; }
+  function appendLog(msg, isError) {
+    var p = document.createElement("div");
+    p.className = isError ? "log-error" : "log-line";
+    p.textContent = msg;
+    logEl.appendChild(p);
+  }
+
+  function setStatus(el, text, ok) {
+    el.textContent = text;
+    el.classList.toggle("pending", !ok);
+  }
+
+  function tryEnable() {
+    generateBtn.disabled = !(reportText && configDoc);
+  }
+
+  function loadReportFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      reportText = reader.result;
+      reportFilename = file.name;
+      setStatus(reportStatus, "Loaded: " + file.name, true);
+      tryEnable();
+    };
+    reader.onerror = function () { setStatus(reportStatus, "Could not read this file.", false); };
+    reader.readAsText(file);
+  }
+
+  function loadConfigFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var parsed;
+      try {
+        parsed = JSON.parse(reader.result);
+      } catch (e) {
+        setStatus(configStatus, "Could not parse this file as JSON: " + e.message, false);
+        return;
+      }
+      if (!parsed || !parsed.configuration || !parsed.configuration.pillars) {
+        setStatus(configStatus, "This doesn't look like a Zero Trust Workshop config export.", false);
+        return;
+      }
+      configDoc = parsed;
+      configFilename = file.name;
+      setStatus(configStatus, "Loaded: " + file.name, true);
+      tryEnable();
+    };
+    reader.onerror = function () { setStatus(configStatus, "Could not read this file.", false); };
+    reader.readAsText(file);
+  }
+
+  reportInput.addEventListener("change", function () { loadReportFile(reportInput.files[0]); });
+  configInput.addEventListener("change", function () { loadConfigFile(configInput.files[0]); });
+
+  [[reportZone, loadReportFile], [configZone, loadConfigFile]].forEach(function (pair) {
+    var zone = pair[0], handler = pair[1];
+    ["dragenter", "dragover"].forEach(function (evt) {
+      zone.addEventListener(evt, function (e) { e.preventDefault(); zone.classList.add("dragover"); });
+    });
+    ["dragleave", "drop"].forEach(function (evt) {
+      zone.addEventListener(evt, function (e) { e.preventDefault(); zone.classList.remove("dragover"); });
+    });
+    zone.addEventListener("drop", function (e) {
+      var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (file) handler(file);
+    });
+  });
+
+  // --- HTML escaping for the markup we build as strings ------------------------
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // --- baseline styling (the downloaded report ships with no external CSS) -----
+
+  var BASELINE_CSS = [
+    // -- page basics --------------------------------------------------------
+    'body { font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif; background:#eef1f4; color:#1b1f24; margin:0; }',
+    '.container { max-width:1180px; margin:0 auto; padding:20px; }',
+    '.skip-link { position:absolute; left:-999px; }',
+    '.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }',
+
+    // -- header ---------------------------------------------------------------
+    '.header { text-align:center; padding:30px 24px; background:linear-gradient(135deg,#0a2540,#0d3a63); border-radius:12px; box-shadow:0 2px 10px rgba(10,37,64,.25); color:#fff; margin-bottom:18px; }',
+    '.header h1 { margin:0; font-size:26px; font-weight:700; color:#fff; }',
+    '.header-subtitle { color:#c7d6e5; margin:8px 0 0; font-size:15px; }',
+
+    // -- pillar filter bar + our injected filter bar share the same card look --
+    '.enhanced-filter-section, .ztm-filter-section, .report-card { background:#fff; border:1px solid #e2e6eb; border-radius:10px; padding:16px 18px; margin:14px 0; box-shadow:0 1px 3px rgba(20,30,40,.06); }',
+    '.filter-label, .ztm-filter-heading { display:block; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#0a2540; margin:0 0 10px; }',
+    '.filter-section-inner { display:flex; flex-wrap:wrap; align-items:center; gap:14px; }',
+    '.filter-button-group, .ztm-chip-group { display:flex; flex-wrap:wrap; gap:8px; }',
+    '.enhanced-filter-btn, .ztm-chip { border:1px solid #d7dbe0; background:#fff; color:#0a2540; border-radius:999px; padding:6px 16px; cursor:pointer; font-size:13px; font:inherit; }',
+    '.enhanced-filter-btn.active, .ztm-chip.active { background:#0a2540; border-color:#0a2540; color:#fff; }',
+    '.ztm-chip-status-blocked.active { background:#b54a00; border-color:#b54a00; }',
+    '.ztm-filter-row { display:flex; flex-wrap:wrap; gap:22px; }',
+    '.ztm-filter-group h3 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:#5b6470; }',
+    '.ztm-toolbar { display:flex; justify-content:space-between; align-items:center; margin-top:14px; color:#5b6470; font-size:13px; }',
+    '.ztm-hint { color:#5b6470; font-size:12.5px; }',
+    '#ztm-search { padding:6px 10px; border:1px solid #d7dbe0; border-radius:6px; font:inherit; }',
+    '#ztm-clear { border:1px solid #d7dbe0; background:#fff; border-radius:6px; padding:6px 14px; cursor:pointer; font:inherit; }',
+
+    // -- section headings -------------------------------------------------------
+    '.section-heading, .section-subtitle { font-size:19px; font-weight:700; color:#0a2540; margin:0 0 14px; display:flex; align-items:center; gap:8px; }',
+
+    // -- implementation roadmap: 4 time-horizon cards ---------------------------
+    '.roadmap-single-row { display:flex; flex-wrap:wrap; gap:16px; }',
+    '.roadmap-phase { flex:1 1 240px; min-width:230px; border-radius:12px; overflow:hidden; background:#fff; box-shadow:0 1px 4px rgba(20,30,40,.08); }',
+    '.roadmap-header { padding:18px 16px; text-align:center; color:#fff; }',
+    '.roadmap-period { font-size:15px; font-weight:700; }',
+    '.roadmap-count { font-size:34px; font-weight:800; line-height:1.2; }',
+    '.roadmap-label { font-size:12.5px; opacity:.9; }',
+    '.roadmap-immediate .roadmap-header { background:linear-gradient(135deg,#e2574c,#c0392b); }',
+    '.roadmap-30days .roadmap-header { background:linear-gradient(135deg,#f0a44c,#d9822b); }',
+    '.roadmap-60days .roadmap-header { background:linear-gradient(135deg,#a06bd6,#7c4dbc); }',
+    '.roadmap-90days .roadmap-header { background:linear-gradient(135deg,#4a90d9,#2f6fb0); }',
+    '.roadmap-content { padding:12px; }',
+    '.expandable-pillar { margin-bottom:6px; }',
+    '.expandable-pillar-header { display:flex; align-items:center; gap:8px; font-weight:600; color:#0a2540; padding:9px 12px; background:#f4f6f8; border-radius:8px; cursor:pointer; }',
+    '.expandable-pillar-header .pillar-name { flex:1; }',
+    '.expandable-pillar-header .task-count { color:#5b6470; font-weight:400; font-size:13px; }',
+    '.expandable-pillar-header .expand-arrow { color:#8a95a1; font-size:11px; }',
+    '.pillar-tasks { padding:6px 4px 2px; }',
+
+    // -- individual tasks (this is what our status/priority/tag filter targets) --
+    '.expandable-task-item { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:8px 6px; border-bottom:1px solid #f0f1f3; }',
+    '.expandable-task-item.ztm-hidden { display:none; }',
+    '.expandable-task-title { flex:1 1 260px; font-size:13.5px; color:#1b1f24; }',
+    '.expandable-task-details { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }',
+    '.task-status-badge, .ztm-priority-badge, .ztm-tag-chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:600; white-space:nowrap; }',
+    '.task-status-badge { background:#eceef1; color:#444; }',
+    '.status-blocked { background:#f7ddd4; color:#8c3610; }',
+    '.status-completed, .status-first-party-other, .status-third-party { background:#d7f0e2; color:#166a43; }',
+    '.status-in-progress { background:#d6f0ec; color:#0f6657; }',
+    '.status-planned, .status-in-planning { background:#dce8fd; color:#0d47a1; }',
+    '.status-follow-up { background:#f5e6c8; color:#7a5300; }',
+    '.status-ms-roadmap { background:#e6dcf5; color:#5b2a99; }',
+    '.status-will-not-pursue, .status-declined, .status-not-applicable { background:#e5e7ea; color:#5b6470; text-decoration:line-through; }',
+    '.status-not-started, .status-not-reviewed { background:#e5e7ea; color:#5b6470; }',
+    '.ztm-priority-badge { background:#efe6fb; color:#5b2a99; }',
+    '.ztm-tag-chip { background:#dfeaff; color:#0d47a1; font-weight:500; }',
+    '.ztm-team-priority-badge { background:#fde8ec; color:#a3123a; }',
+    '.ztm-team-badge { background:#e4f3ea; color:#166a43; font-weight:500; }',
+
+    // -- stat rows: shared by Task Summary + Status Distribution ----------------
+    '.completion-header { display:flex; justify-content:space-between; align-items:center; }',
+    '.completion-pct { font-size:26px; font-weight:800; color:#166a43; }',
+    '.completion-detail, .footnote { color:#5b6470; font-size:12.5px; margin-top:6px; }',
+    '.progress-track { position:relative; background:#e9edf1; border-radius:999px; height:10px; overflow:hidden; margin:6px 0; }',
+    '.progress-track--sm { height:6px; }',
+    '.progress-fill { position:absolute; top:0; left:0; bottom:0; border-radius:999px; }',
+    '.progress-track--stacked { display:flex; }',
+    '.progress-track--stacked .progress-fill { position:static; height:100%; border-radius:0; }',
+    '.stat-row { display:flex; align-items:center; gap:12px; padding:9px 0; }',
+    '.stat-icon { width:34px; height:34px; min-width:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:15px; color:#fff; }',
+    '.stat-body { flex:1; min-width:0; }',
+    '.stat-label-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }',
+    '.stat-name { font-weight:600; color:#0a2540; font-size:13.5px; }',
+    '.stat-counts { color:#5b6470; font-size:12.5px; margin-right:6px; }',
+    '.sub-breakdown { display:none; padding:4px 0 4px 46px; }',
+    '.sub-breakdown-row { display:flex; justify-content:space-between; color:#5b6470; font-size:12px; padding:2px 0; }',
+
+    // -- top risks ----------------------------------------------------------------
+    '.risk-item { background:#f7f8fa; border-radius:10px; padding:14px 16px; margin-bottom:10px; }',
+    '.risk-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; cursor:pointer; }',
+    '.risk-title { font-weight:700; color:#0a2540; font-size:14.5px; }',
+    '.risk-description { color:#5b6470; font-size:13px; margin-top:4px; }',
+    '.risk-task-count { color:#5b6470; font-size:12.5px; margin-top:6px; }',
+    '.risk-details { display:none; margin-top:12px; padding-top:12px; border-top:1px solid #e2e6eb; }',
+
+    // -- workshop notes -------------------------------------------------------------
+    '.notes-pillar-header { display:flex; align-items:center; gap:8px; background:#f4f6f8; border-radius:8px; padding:9px 12px; cursor:pointer; font-size:13.5px; }',
+    '.notes-pillar-tasks { display:none; padding:8px 4px; }',
+    '.note-task-item { padding:8px 6px; border-bottom:1px solid #f0f1f3; }',
+    '.note-task-header { display:flex; gap:10px; align-items:baseline; }',
+    '.note-task-id { font-family:ui-monospace,Consolas,monospace; font-weight:600; color:#0a2540; font-size:12.5px; }',
+    '.note-task-name { font-size:13px; color:#1b1f24; }',
+    '.note-task-note { color:#5b6470; font-size:12.5px; margin-top:4px; }',
+    '.roadmap-note-icon { cursor:help; margin-left:2px; font-size:12px; }',
+    '.note-tooltip { display:none; max-width:280px; white-space:pre-line; background:#1b1f24; color:#fff; ' +
+      'font-size:12.5px; line-height:1.4; padding:8px 10px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,.25); z-index:9999; }'
+  ].join("\n");
+
+  // --- the script injected into the merged report (its exact text is hashed for CSP) ---
+
+  var FILTER_SCRIPT_SOURCE = [
+    '(function () {',
+    '  "use strict";',
+    '  var statusFilter = new Set();',
+    '  var priorityFilter = new Set();',
+    '  var teamPriorityFilter = new Set();',
+    '  var teamFilter = new Set();',
+    '  var tagFilter = new Set();',
+    '  var searchBox = document.getElementById("ztm-search");',
+    '  var items = Array.prototype.slice.call(document.querySelectorAll(".expandable-task-item[data-status]"));',
+    '  var summaryEl = document.getElementById("ztm-summary");',
+    '',
+    '  // Restore collapse/expand behavior for every accordion in the report (pillar',
+    '  // task lists, Top Risks, Workshop Notes, Status Distribution breakdowns) — the',
+    '  // shipped report has no JS at all, so none of them normally do anything. They',
+    '  // all share the same role="button" + aria-controls + aria-expanded markup,',
+    '  // so one generic handler wires up all of them.',
+    '  var toggleHeaders = Array.prototype.slice.call(document.querySelectorAll(\'[role="button"][aria-controls]\'));',
+    '  toggleHeaders.forEach(function (header) {',
+    '    var targetId = header.getAttribute("aria-controls");',
+    '    var target = targetId && document.getElementById(targetId);',
+    '    var arrow = header.querySelector(".expand-arrow, .notes-expand-arrow");',
+    '    if (!target) return;',
+    '    function setExpanded(expanded) {',
+    '      target.style.display = expanded ? "block" : "none";',
+    '      header.setAttribute("aria-expanded", expanded ? "true" : "false");',
+    '      if (arrow) arrow.textContent = expanded ? "\\u25bc" : "\\u25b6";',
+    '    }',
+    '    header._ztmSetExpanded = setExpanded;',
+    '    setExpanded(false);',
+    '    header.addEventListener("click", function () {',
+    '      setExpanded(header.getAttribute("aria-expanded") !== "true");',
+    '    });',
+    '    header.addEventListener("keydown", function (e) {',
+    '      if (e.key === "Enter" || e.key === " ") {',
+    '        e.preventDefault();',
+    '        setExpanded(header.getAttribute("aria-expanded") !== "true");',
+    '      }',
+    '    });',
+    '  });',
+    '',
+    '  // The report links to a logo file the plain HTML download does not include;',
+    '  // fall back to a small inline redraw of the Microsoft four-square mark.',
+    '  var logo = document.querySelector(\'.header img[alt="Microsoft logo"]\');',
+    '  if (logo) {',
+    '    var fallback = "data:image/svg+xml;utf8," + encodeURIComponent(',
+    "      '<svg xmlns=\\\"http://www.w3.org/2000/svg\\\" viewBox=\\\"0 0 23 23\\\">' +",
+    "      '<rect x=\\\"1\\\" y=\\\"1\\\" width=\\\"10\\\" height=\\\"10\\\" fill=\\\"#F25022\\\"/>' +",
+    "      '<rect x=\\\"12\\\" y=\\\"1\\\" width=\\\"10\\\" height=\\\"10\\\" fill=\\\"#7FBA00\\\"/>' +",
+    "      '<rect x=\\\"1\\\" y=\\\"12\\\" width=\\\"10\\\" height=\\\"10\\\" fill=\\\"#00A4EF\\\"/>' +",
+    "      '<rect x=\\\"12\\\" y=\\\"12\\\" width=\\\"10\\\" height=\\\"10\\\" fill=\\\"#FFB900\\\"/></svg>'",
+    "    );",
+    '    logo.addEventListener("error", function () { logo.src = fallback; }, { once: true });',
+    '    if (logo.complete && logo.naturalWidth === 0) logo.src = fallback;',
+    '  }',
+    '',
+    '  // Restore the hover/focus tooltip for the note icon next to a task title.',
+    '  // The report already ships a shared #note-tooltip container plus a data-note',
+    '  // attribute + .roadmap-note-icon span on tasks that have a note; only the',
+    '  // positioning/show/hide logic (normally in the missing JS bundle) is missing.',
+    '  var noteTooltip = document.getElementById("note-tooltip");',
+    '  if (noteTooltip) {',
+    '    Array.prototype.slice.call(document.querySelectorAll(".roadmap-note-icon")).forEach(function (icon) {',
+    '      var item = icon.closest(".expandable-task-item");',
+    '      var noteText = item && item.getAttribute("data-note");',
+    '      if (!noteText) return;',
+    '      icon.setAttribute("tabindex", "0");',
+    '      icon.setAttribute("role", "img");',
+    '      icon.setAttribute("aria-label", "Note: " + noteText);',
+    '      function showTooltip() {',
+    '        noteTooltip.textContent = noteText;',
+    '        noteTooltip.style.display = "block";',
+    '        noteTooltip.setAttribute("aria-hidden", "false");',
+    '        var rect = icon.getBoundingClientRect();',
+    '        noteTooltip.style.position = "fixed";',
+    '        noteTooltip.style.top = (rect.bottom + 6) + "px";',
+    '        var left = rect.left;',
+    '        var maxLeft = window.innerWidth - noteTooltip.offsetWidth - 8;',
+    '        if (left > maxLeft) left = Math.max(8, maxLeft);',
+    '        noteTooltip.style.left = left + "px";',
+    '      }',
+    '      function hideTooltip() {',
+    '        noteTooltip.style.display = "none";',
+    '        noteTooltip.setAttribute("aria-hidden", "true");',
+    '      }',
+    '      icon.addEventListener("mouseenter", showTooltip);',
+    '      icon.addEventListener("mouseleave", hideTooltip);',
+    '      icon.addEventListener("focus", showTooltip);',
+    '      icon.addEventListener("blur", hideTooltip);',
+    '    });',
+    '  }',
+    '',
+    '  // The "Filter by Pillar" buttons at the top are also normally wired up by the',
+    '  // missing JS bundle. Restore them scoped to the Implementation Roadmap section:',
+    '  // each pillar block there already carries its pillar on its task items.',
+    '  var pillarFilterButtons = Array.prototype.slice.call(document.querySelectorAll("#pillar-filters .enhanced-filter-btn"));',
+    '  var pillarBlocks = Array.prototype.slice.call(document.querySelectorAll(".expandable-pillar"));',
+    '',
+    '  // Shared by both the pillar-scope buttons and our own status/priority/team/tag',
+    '  // filter bar: recomputes each pillar\'s task-count ("N" or "visible / N") and',
+    '  // each time-horizon card\'s big colored total from what is currently visible —',
+    '  // i.e. not hidden by .ztm-hidden (task-level filters) and not inside a pillar',
+    '  // block hidden by the pillar-scope buttons.',
+    '  function updateRoadmapCounts() {',
+    '    var visibleByBlock = new Map();',
+    '    pillarBlocks.forEach(function (pillarBlock) {',
+    '      var taskItemsInBlock = Array.prototype.slice.call(pillarBlock.querySelectorAll(".expandable-task-item"));',
+    '      var visibleCount = 0;',
+    '      taskItemsInBlock.forEach(function (item) {',
+    '        if (!item.classList.contains("ztm-hidden")) visibleCount++;',
+    '      });',
+    '      visibleByBlock.set(pillarBlock, visibleCount);',
+    '      var taskCountEl = pillarBlock.querySelector(".task-count");',
+    '      if (taskCountEl) {',
+    '        var total = taskItemsInBlock.length;',
+    '        taskCountEl.textContent = (visibleCount === total) ? String(total) : (visibleCount + " / " + total);',
+    '      }',
+    '    });',
+    '    Array.prototype.slice.call(document.querySelectorAll(".roadmap-phase")).forEach(function (phase) {',
+    '      var countEl = phase.querySelector(".roadmap-count");',
+    '      if (!countEl) return;',
+    '      var sum = 0;',
+    '      Array.prototype.slice.call(phase.querySelectorAll(".expandable-pillar")).forEach(function (pillarBlock) {',
+    '        if (pillarBlock.style.display === "none") return;',
+    '        sum += visibleByBlock.get(pillarBlock) || 0;',
+    '      });',
+    '      countEl.textContent = String(sum);',
+    '    });',
+    '  }',
+    '',
+    '  function applyPillarFilter(pillarKey) {',
+    '    pillarBlocks.forEach(function (block) {',
+    '      var sample = block.querySelector(".expandable-task-item[data-pillar]");',
+    '      var blockPillar = sample && sample.getAttribute("data-pillar");',
+    '      block.style.display = (pillarKey === "all" || blockPillar === pillarKey) ? "" : "none";',
+    '    });',
+    '    updateRoadmapCounts();',
+    '  }',
+    '  pillarFilterButtons.forEach(function (btn) {',
+    '    btn.addEventListener("click", function () {',
+    '      pillarFilterButtons.forEach(function (b) {',
+    '        b.classList.remove("active");',
+    '        b.setAttribute("aria-selected", "false");',
+    '      });',
+    '      btn.classList.add("active");',
+    '      btn.setAttribute("aria-selected", "true");',
+    '      applyPillarFilter(btn.getAttribute("data-filter") || "all");',
+    '    });',
+    '  });',
+    '',
+    '  function wireChips(containerId, set) {',
+    '    var container = document.getElementById(containerId);',
+    '    if (!container) return;',
+    '    Array.prototype.slice.call(container.querySelectorAll(".ztm-chip")).forEach(function (chip) {',
+    '      chip.addEventListener("click", function () {',
+    '        var v = chip.getAttribute("data-value");',
+    '        if (set.has(v)) { set.delete(v); chip.classList.remove("active"); }',
+    '        else { set.add(v); chip.classList.add("active"); }',
+    '        applyFilters();',
+    '      });',
+    '    });',
+    '  }',
+    '',
+    '  function applyFilters() {',
+    '    var search = ((searchBox && searchBox.value) || "").trim().toLowerCase();',
+    '    var visible = 0;',
+    '    items.forEach(function (item) {',
+    '      var status = item.getAttribute("data-status") || "";',
+    '      var priority = item.getAttribute("data-priority") || "none";',
+    '      var teamPriority = item.getAttribute("data-team-priority") || "none";',
+    '      var team = item.getAttribute("data-team") || "";',
+    '      var tags = (item.getAttribute("data-tags") || "").split(",").filter(Boolean);',
+    '      var taskId = item.getAttribute("data-task-id") || "";',
+    '      var ok = true;',
+    '      if (statusFilter.size && !statusFilter.has(status)) ok = false;',
+    '      if (ok && priorityFilter.size && !priorityFilter.has(priority)) ok = false;',
+    '      if (ok && teamPriorityFilter.size && !teamPriorityFilter.has(teamPriority)) ok = false;',
+    '      if (ok && teamFilter.size && !teamFilter.has(team)) ok = false;',
+    '      if (ok && tagFilter.size && !tags.some(function (t) { return tagFilter.has(t); })) ok = false;',
+    '      if (ok && search && taskId.toLowerCase().indexOf(search) === -1) ok = false;',
+    '      item.classList.toggle("ztm-hidden", !ok);',
+    '      if (ok) visible++;',
+    '    });',
+    '    if (summaryEl) summaryEl.textContent = "Showing " + visible + " of " + items.length + " tasks";',
+    '',
+    '    // Auto-expand pillar sections that contain a match so filtered results are',
+    '    // actually visible; collapse back to the original look once filters clear.',
+    '    var filtersActive = !!(statusFilter.size || priorityFilter.size || teamPriorityFilter.size ||',
+    '      teamFilter.size || tagFilter.size || search);',
+    '    Array.prototype.slice.call(document.querySelectorAll(".pillar-tasks")).forEach(function (block) {',
+    '      var header = document.querySelector(\'[aria-controls="\' + block.id + \'"]\');',
+    '      if (!header || !header._ztmSetExpanded) return;',
+    '      if (!filtersActive) { header._ztmSetExpanded(false); return; }',
+    '      var hasVisible = Array.prototype.some.call(block.querySelectorAll(".expandable-task-item"), function (item) {',
+    '        return !item.classList.contains("ztm-hidden");',
+    '      });',
+    '      header._ztmSetExpanded(hasVisible);',
+    '    });',
+    '',
+    '    updateRoadmapCounts();',
+    '  }',
+    '',
+    '  wireChips("ztm-status-chips", statusFilter);',
+    '  wireChips("ztm-priority-chips", priorityFilter);',
+    '  wireChips("ztm-team-priority-chips", teamPriorityFilter);',
+    '  wireChips("ztm-team-chips", teamFilter);',
+    '  wireChips("ztm-tag-chips", tagFilter);',
+    '  if (searchBox) searchBox.addEventListener("input", applyFilters);',
+    '  var clearBtn = document.getElementById("ztm-clear");',
+    '  if (clearBtn) {',
+    '    clearBtn.addEventListener("click", function () {',
+    '      statusFilter.clear(); priorityFilter.clear(); teamPriorityFilter.clear(); teamFilter.clear(); tagFilter.clear();',
+    '      if (searchBox) searchBox.value = "";',
+    '      var chipContainerIds = ["ztm-status-chips", "ztm-priority-chips", "ztm-team-priority-chips", "ztm-team-chips", "ztm-tag-chips"];',
+    '      chipContainerIds.forEach(function (id) {',
+    '        var container = document.getElementById(id);',
+    '        if (!container) return;',
+    '        Array.prototype.slice.call(container.querySelectorAll(".ztm-chip")).forEach(function (c) { c.classList.remove("active"); });',
+    '      });',
+    '      applyFilters();',
+    '    });',
+    '  }',
+    '  applyFilters();',
+    "})();"
+  ].join("\n");
+
+  // Formats a task's structured fields into the plain-text tooltip shown by the
+  // note icon. Falls back to freeText verbatim for tasks not using the pipe format.
+  function buildNoteTooltipText(teamPriority, team, featureNr, link, freeText) {
+    if (teamPriority || team || featureNr || link) {
+      var lines = [];
+      if (teamPriority) lines.push("Team priority: " + teamPriority);
+      if (team) lines.push("Team: " + team);
+      if (featureNr) lines.push("Feature #: " + featureNr);
+      if (link) lines.push("Link: " + link);
+      return lines.join("\n");
+    }
+    return freeText || "";
+  }
+
+  // Rebuilds the Workshop Notes section entirely from the current JSON (tasks with a
+  // note and/or tags), grouped by pillar. IDs are prefixed "ztm-" so they never
+  // collide with anything the original static report already used.
+  function buildWorkshopNotesHtml(notesByPillar) {
+    var pillarKeys = Object.keys(notesByPillar).sort();
+    var total = pillarKeys.reduce(function (sum, k) { return sum + notesByPillar[k].length; }, 0);
+    if (!total) {
+      return '<p style="margin-bottom:16px; color:#5b6470; font-size:0.875rem;">' +
+        "No workshop notes or tags found in the JSON that was merged in.</p>";
+    }
+    var parts = ['<p style="margin-bottom:16px; color:#5b6470; font-size:0.875rem;">Found <strong>' + total +
+      "</strong> task(s) with notes or tags across " + pillarKeys.length +
+      " pillar(s) &mdash; rebuilt live from your JSON.</p>"];
+    pillarKeys.forEach(function (pillarKey) {
+      var tasks = notesByPillar[pillarKey];
+      var sectionId = "ztm-notes-" + pillarKey;
+      parts.push('<div class="notes-pillar"><div class="notes-pillar-header" role="button" tabindex="0" ' +
+        'aria-expanded="false" aria-controls="' + sectionId + '"><strong>' +
+        escapeHtml(ZTShared.labelize(pillarKey)) + "</strong> (" + tasks.length + " task" +
+        (tasks.length === 1 ? "" : "s") + ')<span class="notes-expand-arrow" aria-hidden="true">▶</span></div>' +
+        '<div class="notes-pillar-tasks" id="' + sectionId + '">');
+      tasks.forEach(function (t) {
+        var badges = [];
+        if (t.teamPriority) badges.push('<span class="ztm-team-priority-badge">Team P' + escapeHtml(t.teamPriority) + "</span>");
+        if (t.team) badges.push('<span class="ztm-team-badge">' + escapeHtml(t.team) + "</span>");
+        t.tags.forEach(function (tag) { badges.push('<span class="ztm-tag-chip">' + escapeHtml(tag) + "</span>"); });
+        var badgesHtml = badges.length ? '<div>' + badges.join(" ") + "</div>" : "";
+        var detailBits = [];
+        if (t.featureNr) detailBits.push("Feature #" + escapeHtml(t.featureNr));
+        if (t.link) detailBits.push('<a href="' + escapeHtml(t.link) + '" target="_blank" rel="noopener">' + escapeHtml(t.link) + "</a>");
+        var detailHtml = detailBits.length ? '<div class="note-task-note">' + detailBits.join(" &middot; ") + "</div>" : "";
+        var freeTextHtml = t.freeText ? '<div class="note-task-note">' + escapeHtml(t.freeText) + "</div>" : "";
+        parts.push('<div class="note-task-item"><div class="note-task-header"><span class="note-task-id">' +
+          escapeHtml(t.taskId) + '</span><span class="note-task-name">' + escapeHtml(t.title) + "</span></div>" +
+          badgesHtml + detailHtml + freeTextHtml + "</div>");
+      });
+      parts.push("</div></div>");
+    });
+    return parts.join("");
+  }
+
+  // Adds a "Blocked tasks" risk card computed live from the JSON, on top of whatever
+  // Top Risks cards the original report already shipped with. We only add the one risk
+  // type (blocked tasks) that's fully derivable from the JSON alone; the others
+  // ("N unstarted P0 tasks", per-pillar completion %) need the full task catalog to
+  // compute accurately, which isn't available outside the official tool, so those
+  // existing cards are left as the snapshot from when the report was exported.
+  function buildBlockedRiskHtml(blockedTasks) {
+    var items = blockedTasks.map(function (t) {
+      return '<li style="margin-bottom:5px; color:#555; font-size:0.875rem;">' +
+        '<strong style="color:#333;">' + escapeHtml(t.title) + "</strong> (" +
+        escapeHtml(ZTShared.labelize(t.pillar)) + ", " + escapeHtml(t.taskId) + ")</li>";
+    }).join("");
+    return [
+      '<div class="risk-item" data-ztm-generated="1">',
+      '  <div class="risk-header" role="button" tabindex="0" aria-expanded="false" aria-controls="ztm-risk-blocked">',
+      "    <div>",
+      '      <div class="risk-title">⚠️ Blocked tasks: ' + blockedTasks.length +
+        " (live from your JSON)</div>",
+      '      <div class="risk-description">These tasks are currently marked Blocked in your team’s tracking JSON — not necessarily reflected elsewhere on this page.</div>',
+      '      <div class="risk-task-count">' + blockedTasks.length + " task" + (blockedTasks.length === 1 ? "" : "s") + " to address</div>",
+      "    </div>",
+      '    <span class="expand-arrow" aria-hidden="true">▶</span>',
+      "  </div>",
+      '  <div class="risk-details" id="ztm-risk-blocked">',
+      '    <div style="font-weight:600; margin-bottom:10px; color:#333;">Blocked tasks:</div>',
+      '    <ul style="margin:0; padding-left:20px;">' + items + "</ul>",
+      "  </div>",
+      "</div>"
+    ].join("\n");
+  }
+
+  function buildFilterBarHtml(statuses, priorities, hasNoPriority, teamPriorities, hasNoTeamPriority, teams, tags) {
+    function chip(value, label, extraClass) {
+      return '<button type="button" class="ztm-chip' + (extraClass ? " " + extraClass : "") +
+        '" data-value="' + escapeHtml(value) + '">' + escapeHtml(label) + "</button>";
+    }
+    var statusChips = ZTShared.STATUS_VALUES
+      .filter(function (s) { return statuses.indexOf(s) !== -1; })
+      .map(function (s) { return chip(s, ZTShared.labelize(s), "ztm-chip-status-" + s); })
+      .join("");
+    var priorityChips = ZTShared.PRIORITY_VALUES
+      .filter(function (p) { return priorities.indexOf(p) !== -1; })
+      .map(function (p) { return chip(p, p); })
+      .join("") + (hasNoPriority ? chip("none", "No priority") : "");
+    var teamPriorityChips = ZTShared.TEAM_PRIORITY_VALUES
+      .filter(function (p) { return teamPriorities.indexOf(p) !== -1; })
+      .map(function (p) { return chip(p, p); })
+      .join("") + (hasNoTeamPriority ? chip("none", "No team priority") : "");
+    var teamChips = teams.map(function (t) { return chip(t, t); }).join("") ||
+      '<span class="ztm-hint">No teams yet</span>';
+    var tagChips = tags.map(function (t) { return chip(t, t); }).join("") ||
+      '<span class="ztm-hint">No tags yet</span>';
+
+    return [
+      '<section class="ztm-filter-section" aria-labelledby="ztm-filter-heading" data-ztm-injected="1">',
+      '  <h2 id="ztm-filter-heading" class="ztm-filter-heading">Team filters &amp; tags</h2>',
+      '  <div class="ztm-filter-row">',
+      '    <div class="ztm-filter-group"><h3>Status</h3><div class="ztm-chip-group" id="ztm-status-chips">' + statusChips + "</div></div>",
+      '    <div class="ztm-filter-group"><h3>Priority</h3><div class="ztm-chip-group" id="ztm-priority-chips">' + priorityChips + "</div></div>",
+      '    <div class="ztm-filter-group"><h3>Team priority</h3><div class="ztm-chip-group" id="ztm-team-priority-chips">' + teamPriorityChips + "</div></div>",
+      '    <div class="ztm-filter-group"><h3>Team</h3><div class="ztm-chip-group" id="ztm-team-chips">' + teamChips + "</div></div>",
+      '    <div class="ztm-filter-group" style="flex:1; min-width:220px;"><h3>Tags</h3><div class="ztm-chip-group" id="ztm-tag-chips">' + tagChips + "</div></div>",
+      '    <div class="ztm-filter-group"><h3>Task ID search</h3><input type="text" id="ztm-search" placeholder="e.g. RMI_"></div>',
+      "  </div>",
+      '  <div class="ztm-toolbar"><div id="ztm-summary"></div><button type="button" id="ztm-clear">Clear filters</button></div>',
+      "</section>"
+    ].join("\n");
+  }
+
+  // --- CSP: allowlist the injected script by its exact hash, no unsafe-inline --
+
+  async function computeScriptHash(text) {
+    var enc = new TextEncoder().encode(text);
+    var digestBuf = await crypto.subtle.digest("SHA-256", enc);
+    var bytes = new Uint8Array(digestBuf);
+    var binary = "";
+    for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  }
+
+  function patchCsp(htmlDoc, hash) {
+    var meta = htmlDoc.querySelector('meta[http-equiv="Content-Security-Policy"]');
+    if (!meta) return;
+    var content = meta.getAttribute("content");
+    var patched = content.replace(/script-src\s+([^;]*);/, function (_, existing) {
+      return "script-src " + existing.trim() + " 'sha256-" + hash + "';";
+    });
+    meta.setAttribute("content", patched);
+  }
+
+  function mergedFilename(original) {
+    var base = original.replace(/\.html?$/i, "");
+    return base + " (tagged).htm";
+  }
+
+  function downloadFile(text, filename) {
+    var blob = new Blob([text], { type: "text/html" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // --- main merge routine --------------------------------------------------------
+
+  async function generate() {
+    clearLog();
+    try {
+      var htmlDoc = new DOMParser().parseFromString(reportText, "text/html");
+
+      if (htmlDoc.body.getAttribute("data-ztm-patched")) {
+        appendLog("This report already looks patched (it has a previous team filter bar). " +
+          "Load a fresh export from the official tool instead of a file this tool already produced.", true);
+        return;
+      }
+
+      var pillarFilterSection = htmlDoc.querySelector(".enhanced-filter-section");
+      var taskItems = htmlDoc.querySelectorAll(".expandable-task-item[data-task-id][data-pillar]");
+      if (!pillarFilterSection || !taskItems.length) {
+        appendLog("This doesn't look like a Zero Trust Workshop progress report " +
+          "(expected the pillar filter bar and task list markup).", true);
+        return;
+      }
+
+      // Flatten JSON overrides into a pillar|taskId lookup.
+      var overrides = {};
+      var pillars = (configDoc.configuration && configDoc.configuration.pillars) || {};
+      Object.keys(pillars).forEach(function (pillarKey) {
+        var taskOverrides = (pillars[pillarKey] && pillars[pillarKey].taskOverrides) || {};
+        Object.keys(taskOverrides).forEach(function (taskId) {
+          var ov = taskOverrides[taskId];
+          var parsed = ZTShared.parseNotes(ov.notes);
+          overrides[pillarKey + "|" + taskId] = {
+            status: ov.status || "",
+            priority: ov.priority || "",
+            teamPriority: parsed.teamPriority,
+            team: parsed.team,
+            featureNr: parsed.featureNr,
+            link: parsed.link,
+            tags: parsed.tags,
+            freeText: parsed.freeText
+          };
+        });
+      });
+
+      var usedKeys = {};
+      var matched = 0;
+      var allStatuses = {}, allPriorities = {}, allTeamPriorities = {}, allTeams = {}, allTags = {};
+      var hasNoPriority = false, hasNoTeamPriority = false;
+      var notesByPillar = {};
+      var blockedTasks = [];
+
+      taskItems.forEach(function (item) {
+        var pillar = item.getAttribute("data-pillar");
+        var taskId = item.getAttribute("data-task-id");
+        var badge = item.querySelector(".task-status-badge");
+        var fallbackStatus = "not-reviewed";
+        if (badge) {
+          var statusClass = Array.prototype.find.call(badge.classList, function (c) {
+            return c.indexOf("status-") === 0;
+          });
+          if (statusClass) fallbackStatus = statusClass.slice("status-".length);
+        }
+
+        var key = pillar + "|" + taskId;
+        var ov = overrides[key];
+        if (ov) { matched++; usedKeys[key] = true; }
+
+        var status = ov ? (ov.status || fallbackStatus) : fallbackStatus;
+        var priority = ov ? ov.priority : "";
+        var teamPriority = ov ? ov.teamPriority : "";
+        var team = ov ? ov.team : "";
+        var featureNr = ov ? ov.featureNr : "";
+        var link = ov ? ov.link : "";
+        var tags = ov ? ov.tags : [];
+        var freeText = ov ? ov.freeText : "";
+
+        allStatuses[status] = true;
+        if (priority) allPriorities[priority] = true; else hasNoPriority = true;
+        if (teamPriority) allTeamPriorities[teamPriority] = true; else hasNoTeamPriority = true;
+        if (team) allTeams[team] = true;
+        tags.forEach(function (t) { allTags[t] = true; });
+
+        item.setAttribute("data-status", status);
+        if (priority) item.setAttribute("data-priority", priority); else item.removeAttribute("data-priority");
+        if (teamPriority) item.setAttribute("data-team-priority", teamPriority); else item.removeAttribute("data-team-priority");
+        if (team) item.setAttribute("data-team", team); else item.removeAttribute("data-team");
+        item.setAttribute("data-tags", tags.join(","));
+
+        if (badge) {
+          badge.className = "task-status-badge status-" + status;
+          badge.textContent = ZTShared.labelize(status);
+        }
+
+        var details = item.querySelector(".expandable-task-details");
+        if (details) {
+          if (priority) {
+            var pbadge = htmlDoc.createElement("span");
+            pbadge.className = "ztm-priority-badge";
+            pbadge.textContent = priority;
+            details.appendChild(pbadge);
+          }
+          if (teamPriority) {
+            var tpbadge = htmlDoc.createElement("span");
+            tpbadge.className = "ztm-team-priority-badge";
+            tpbadge.textContent = "Team P" + teamPriority;
+            details.appendChild(tpbadge);
+          }
+          if (team) {
+            var teambadge = htmlDoc.createElement("span");
+            teambadge.className = "ztm-team-badge";
+            teambadge.textContent = team;
+            details.appendChild(teambadge);
+          }
+          tags.forEach(function (t) {
+            var tchip = htmlDoc.createElement("span");
+            tchip.className = "ztm-tag-chip";
+            tchip.textContent = t;
+            details.appendChild(tchip);
+          });
+        }
+
+        var titleEl = item.querySelector(".expandable-task-title");
+        var title = titleEl ? titleEl.textContent.trim() : taskId;
+
+        var hasNoteContent = !!(freeText || team || featureNr || link || teamPriority);
+
+        // The original report drives its hover-tooltip note icon off this same
+        // data-note attribute + a .roadmap-note-icon span; keep both in sync with
+        // the current JSON so newly-added/edited/cleared notes show up correctly.
+        var existingNoteIcon = titleEl ? titleEl.querySelector(".roadmap-note-icon") : null;
+        if (hasNoteContent) {
+          item.setAttribute("data-note", buildNoteTooltipText(teamPriority, team, featureNr, link, freeText));
+          if (titleEl && !existingNoteIcon) {
+            var noteIcon = htmlDoc.createElement("span");
+            noteIcon.className = "roadmap-note-icon";
+            noteIcon.textContent = "📝";
+            titleEl.appendChild(noteIcon);
+          }
+        } else {
+          item.removeAttribute("data-note");
+          if (existingNoteIcon) existingNoteIcon.remove();
+        }
+
+        if (hasNoteContent || tags.length) {
+          if (!notesByPillar[pillar]) notesByPillar[pillar] = [];
+          notesByPillar[pillar].push({
+            taskId: taskId, title: title, teamPriority: teamPriority, team: team,
+            featureNr: featureNr, link: link, tags: tags, freeText: freeText
+          });
+        }
+        if (status === "blocked") {
+          blockedTasks.push({ taskId: taskId, title: title, pillar: pillar });
+        }
+      });
+
+      var totalOverrideKeys = Object.keys(overrides).length;
+      var unmatched = totalOverrideKeys - Object.keys(usedKeys).length;
+
+      // Workshop Notes and Top Risks are baked into the report as a snapshot of
+      // whatever the JSON looked like at export time; they don't update themselves
+      // when you later edit notes/tags/status elsewhere. Rebuild them here so they
+      // reflect what's actually in the JSON being merged right now.
+      var notesContent = htmlDoc.getElementById("workshop-notes-content");
+      if (notesContent) {
+        notesContent.innerHTML = buildWorkshopNotesHtml(notesByPillar);
+      }
+      var risksContent = htmlDoc.getElementById("risks-actions-content");
+      if (risksContent && blockedTasks.length) {
+        risksContent.insertAdjacentHTML("afterbegin", buildBlockedRiskHtml(blockedTasks));
+      }
+
+      // Inject baseline styling.
+      var styleEl = htmlDoc.createElement("style");
+      styleEl.setAttribute("data-ztm-style", "1");
+      styleEl.textContent = BASELINE_CSS;
+      htmlDoc.head.appendChild(styleEl);
+
+      // Inject the filter bar right after the existing (read-only) pillar filter bar.
+      var filterBarHtml = buildFilterBarHtml(
+        Object.keys(allStatuses).sort(),
+        Object.keys(allPriorities).sort(),
+        hasNoPriority,
+        Object.keys(allTeamPriorities).sort(),
+        hasNoTeamPriority,
+        Object.keys(allTeams).sort(),
+        Object.keys(allTags).sort()
+      );
+      pillarFilterSection.insertAdjacentHTML("afterend", filterBarHtml);
+      htmlDoc.body.setAttribute("data-ztm-patched", "1");
+
+      // Inject the filter script and allowlist its exact hash in the CSP.
+      var scriptEl = htmlDoc.createElement("script");
+      scriptEl.textContent = FILTER_SCRIPT_SOURCE;
+      htmlDoc.body.appendChild(scriptEl);
+      var hash = await computeScriptHash(FILTER_SCRIPT_SOURCE);
+      patchCsp(htmlDoc, hash);
+
+      var finalHtml = "<!DOCTYPE html>\n" + htmlDoc.documentElement.outerHTML;
+      downloadFile(finalHtml, mergedFilename(reportFilename));
+
+      appendLog("Done — downloaded " + mergedFilename(reportFilename) + ".");
+      appendLog("Matched " + matched + " of " + taskItems.length + " report tasks to overrides in " + configFilename + ".");
+      if (unmatched > 0) {
+        appendLog(unmatched + " override(s) in the JSON had no matching task in this report " +
+          "(different pillar/export scope?) and were skipped.");
+      }
+    } catch (e) {
+      appendLog("Something went wrong: " + e.message, true);
+    }
+  }
+
+  generateBtn.addEventListener("click", function () { generate(); });
+})();
+</script>
+
+</body>
+</html>
