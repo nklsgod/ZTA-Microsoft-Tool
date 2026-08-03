@@ -949,13 +949,18 @@
       }
       var reportPillars = {};
       var reportTaskIdsByNormalized = {};
+      var reportTaskIdsAnyPillar = {};
       taskItems.forEach(function (item) {
         var p = item.getAttribute("data-pillar");
         var t = item.getAttribute("data-task-id");
+        var nk = normalizeId(t);
         reportPillars[p] = true;
-        reportTaskIdsByNormalized[p + "|" + normalizeId(t)] = t;
+        reportTaskIdsByNormalized[p + "|" + nk] = t;
+        if (!reportTaskIdsAnyPillar[nk]) reportTaskIdsAnyPillar[nk] = [];
+        reportTaskIdsAnyPillar[nk].push({ pillar: p, taskId: t });
       });
       var nearMatches = [];
+      var crossPillarMatches = [];
       var missingPillars = {};
       var trulyMissing = [];
       Object.keys(overrides).forEach(function (key) {
@@ -963,16 +968,30 @@
         var idx = key.indexOf("|");
         var pillarKey = key.slice(0, idx);
         var taskId = key.slice(idx + 1);
+        var normId = normalizeId(taskId);
+
+        var candidate = reportTaskIdsByNormalized[pillarKey + "|" + normId];
+        if (candidate && candidate !== taskId) {
+          nearMatches.push(pillarKey + ": JSON has \"" + taskId + "\", report has \"" + candidate + "\"");
+          return;
+        }
+
+        // Same task ID exists in the report, just filed under a different pillar
+        // than the JSON's override key — e.g. the framework re-categorized a task
+        // since this override was last saved.
+        var crossHits = (reportTaskIdsAnyPillar[normId] || []).filter(function (h) { return h.pillar !== pillarKey; });
+        if (crossHits.length) {
+          crossPillarMatches.push("JSON says " + pillarKey + "|" + taskId + " -> report has \"" +
+            crossHits[0].taskId + "\" under pillar \"" + crossHits[0].pillar + "\"" +
+            (crossHits.length > 1 ? " (+" + (crossHits.length - 1) + " more matches elsewhere)" : ""));
+          return;
+        }
+
         if (!reportPillars[pillarKey]) {
           missingPillars[pillarKey] = (missingPillars[pillarKey] || 0) + 1;
           return;
         }
-        var candidate = reportTaskIdsByNormalized[pillarKey + "|" + normalizeId(taskId)];
-        if (candidate && candidate !== taskId) {
-          nearMatches.push(pillarKey + ": JSON has \"" + taskId + "\", report has \"" + candidate + "\"");
-        } else {
-          trulyMissing.push(pillarKey + "|" + taskId);
-        }
+        trulyMissing.push(pillarKey + "|" + taskId);
       });
 
       // For anything genuinely missing, check whether the raw task ID string shows
@@ -1051,6 +1070,12 @@
             "mismatch (same ID, different punctuation/case):");
           nearMatches.slice(0, 25).forEach(function (m) { appendLog("  - " + m); });
           if (nearMatches.length > 25) appendLog("  ...and " + (nearMatches.length - 25) + " more.");
+        }
+        if (crossPillarMatches.length) {
+          appendLog("[debug] " + crossPillarMatches.length + " of those exist in the report under a " +
+            "DIFFERENT pillar than the JSON's override key (task got re-categorized?):");
+          crossPillarMatches.slice(0, 25).forEach(function (m) { appendLog("  - " + m); });
+          if (crossPillarMatches.length > 25) appendLog("  ...and " + (crossPillarMatches.length - 25) + " more.");
         }
         if (Object.keys(missingPillars).length) {
           appendLog("[debug] These JSON pillar keys don't exist anywhere in this report at all " +
