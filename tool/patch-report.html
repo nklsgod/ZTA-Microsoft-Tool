@@ -975,6 +975,22 @@
         }
       });
 
+      // For anything genuinely missing, check whether the raw task ID string shows
+      // up ANYWHERE in the report's raw HTML text (not just as a proper
+      // .expandable-task-item element) — distinguishes "not in this export at all"
+      // from "present in the file but not rendered as a normal roadmap task item"
+      // (e.g. a different markup structure, a hidden/collapsed section, etc.).
+      var trulyMissingInRawText = [];
+      var trulyMissingNotInRawText = [];
+      trulyMissing.forEach(function (key) {
+        var taskId = key.slice(key.indexOf("|") + 1);
+        if (reportText.indexOf(taskId) !== -1) {
+          trulyMissingInRawText.push(key);
+        } else {
+          trulyMissingNotInRawText.push(key);
+        }
+      });
+
       // Workshop Notes and Top Risks are baked into the report as a snapshot of
       // whatever the JSON looked like at export time; they don't update themselves
       // when you later edit notes/tags/status elsewhere. Rebuild them here so they
@@ -1043,11 +1059,17 @@
               return k + " (" + missingPillars[k] + ")";
             }).join(", ") + ".");
         }
-        if (trulyMissing.length) {
-          appendLog("[debug] " + trulyMissing.length + " override(s) have no close match at all " +
-            "(task genuinely not present in this report export):");
-          trulyMissing.slice(0, 25).forEach(function (k) { appendLog("  - " + k); });
-          if (trulyMissing.length > 25) appendLog("  ...and " + (trulyMissing.length - 25) + " more.");
+        if (trulyMissingNotInRawText.length) {
+          appendLog("[debug] " + trulyMissingNotInRawText.length + " override(s) are NOT present anywhere " +
+            "in the report file's raw text at all (this task simply isn't part of this export):");
+          trulyMissingNotInRawText.slice(0, 25).forEach(function (k) { appendLog("  - " + k); });
+          if (trulyMissingNotInRawText.length > 25) appendLog("  ...and " + (trulyMissingNotInRawText.length - 25) + " more.");
+        }
+        if (trulyMissingInRawText.length) {
+          appendLog("[debug] " + trulyMissingInRawText.length + " override(s) ARE somewhere in the report's " +
+            "raw text, just not as a normal .expandable-task-item element (different/hidden markup?):");
+          trulyMissingInRawText.slice(0, 25).forEach(function (k) { appendLog("  - " + k); });
+          if (trulyMissingInRawText.length > 25) appendLog("  ...and " + (trulyMissingInRawText.length - 25) + " more.");
         }
       }
     } catch (e) {
