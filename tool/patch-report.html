@@ -1001,10 +1001,17 @@
       // (e.g. a different markup structure, a hidden/collapsed section, etc.).
       var trulyMissingInRawText = [];
       var trulyMissingNotInRawText = [];
+      var rawTextContexts = {};
       trulyMissing.forEach(function (key) {
         var taskId = key.slice(key.indexOf("|") + 1);
-        if (reportText.indexOf(taskId) !== -1) {
+        var idx = reportText.indexOf(taskId);
+        if (idx !== -1) {
           trulyMissingInRawText.push(key);
+          var occurrences = reportText.split(taskId).length - 1;
+          var start = Math.max(0, idx - 150);
+          var end = Math.min(reportText.length, idx + taskId.length + 150);
+          var snippet = reportText.slice(start, end).replace(/\s+/g, " ");
+          rawTextContexts[key] = "(" + occurrences + "x in file) ..." + snippet + "...";
         } else {
           trulyMissingNotInRawText.push(key);
         }
@@ -1092,9 +1099,12 @@
         }
         if (trulyMissingInRawText.length) {
           appendLog("[debug] " + trulyMissingInRawText.length + " override(s) ARE somewhere in the report's " +
-            "raw text, just not as a normal .expandable-task-item element (different/hidden markup?):");
-          trulyMissingInRawText.slice(0, 25).forEach(function (k) { appendLog("  - " + k); });
-          if (trulyMissingInRawText.length > 25) appendLog("  ...and " + (trulyMissingInRawText.length - 25) + " more.");
+            "raw text, just not as a normal .expandable-task-item element (different/hidden markup?). " +
+            "Showing the raw HTML around each occurrence so we can see the actual structure:");
+          trulyMissingInRawText.slice(0, 10).forEach(function (k) {
+            appendLog("  - " + k + " " + (rawTextContexts[k] || ""));
+          });
+          if (trulyMissingInRawText.length > 10) appendLog("  ...and " + (trulyMissingInRawText.length - 10) + " more (context omitted for brevity).");
         }
       }
     } catch (e) {
