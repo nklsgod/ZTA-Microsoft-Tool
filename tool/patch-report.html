@@ -1011,7 +1011,16 @@
           var start = Math.max(0, idx - 150);
           var end = Math.min(reportText.length, idx + taskId.length + 150);
           var snippet = reportText.slice(start, end).replace(/\s+/g, " ");
-          rawTextContexts[key] = "(" + occurrences + "x in file) ..." + snippet + "...";
+          // Wider window just to test the "maybe it's a completed task, and completed
+          // tasks aren't rendered as normal roadmap items" theory — look for the
+          // nearest status-* badge class near this occurrence.
+          var wideStart = Math.max(0, idx - 500);
+          var wideEnd = Math.min(reportText.length, idx + taskId.length + 500);
+          var wideSnippet = reportText.slice(wideStart, wideEnd);
+          var statusMatch = /status-([a-z-]+)"/.exec(wideSnippet);
+          rawTextContexts[key] = "(" + occurrences + "x in file" +
+            (statusMatch ? ", nearby status class: status-" + statusMatch[1] : ", no status-* class within 500 chars") +
+            ") ..." + snippet + "...";
         } else {
           trulyMissingNotInRawText.push(key);
         }
@@ -1098,8 +1107,13 @@
           if (trulyMissingNotInRawText.length > 25) appendLog("  ...and " + (trulyMissingNotInRawText.length - 25) + " more.");
         }
         if (trulyMissingInRawText.length) {
+          var completedNearby = trulyMissingInRawText.filter(function (k) {
+            return (rawTextContexts[k] || "").indexOf("status-completed") !== -1;
+          }).length;
           appendLog("[debug] " + trulyMissingInRawText.length + " override(s) ARE somewhere in the report's " +
             "raw text, just not as a normal .expandable-task-item element (different/hidden markup?). " +
+            completedNearby + " of " + trulyMissingInRawText.length + " have a \"status-completed\" class " +
+            "within 500 chars (testing the \"maybe it's a completed task\" theory). " +
             "Showing the raw HTML around each occurrence so we can see the actual structure:");
           trulyMissingInRawText.slice(0, 10).forEach(function (k) {
             appendLog("  - " + k + " " + (rawTextContexts[k] || ""));
