@@ -316,6 +316,7 @@
     '.note-task-id { font-family:ui-monospace,Consolas,monospace; font-weight:600; color:#0a2540; font-size:12.5px; }',
     '.note-task-name { font-size:13px; color:#1b1f24; }',
     '.note-task-note { color:#5b6470; font-size:12.5px; margin-top:4px; }',
+    '.note-task-note.ztm-hint { font-style:italic; }',
     '.roadmap-note-icon { cursor:help; margin-left:2px; font-size:12px; }',
     '.note-tooltip { display:none; max-width:280px; white-space:pre-line; background:#1b1f24; color:#fff; ' +
       'font-size:12.5px; line-height:1.4; padding:8px 10px; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,.25); z-index:9999; }'
@@ -643,6 +644,13 @@
         // text so the card isn't blank under a task the summary count says has a note.
         var rawTextHtml = (!badges.length && !detailBits.length && !t.freeText && t.raw)
           ? '<div class="note-task-note">' + escapeHtml(t.raw) + "</div>" : "";
+        // Tasks recovered from the report's own original Workshop Notes (no
+        // matching roadmap item — typically because they're Completed) carry no
+        // live roadmap data, so flag them so it's clear the badges/status here
+        // come from the JSON/original snapshot, not this report's roadmap.
+        var notInRoadmapHtml = t.notInRoadmap
+          ? '<div class="note-task-note ztm-hint">Not in this report’s Implementation Roadmap ' +
+            '(likely Completed) — recovered from the report’s original Workshop Notes.</div>' : "";
         var attrs = ' data-task-id="' + escapeHtml(t.taskId) + '" data-status="' + escapeHtml(t.status) + '"' +
           (t.priority ? ' data-priority="' + escapeHtml(t.priority) + '"' : "") +
           (t.teamPriority ? ' data-team-priority="' + escapeHtml(t.teamPriority) + '"' : "") +
@@ -650,7 +658,7 @@
           ' data-tags="' + escapeHtml(t.tags.join(",")) + '"';
         parts.push('<div class="note-task-item"' + attrs + '><div class="note-task-header"><span class="note-task-id">' +
           escapeHtml(t.taskId) + '</span><span class="note-task-name">' + escapeHtml(t.title) + "</span></div>" +
-          badgesHtml + detailHtml + freeTextHtml + rawTextHtml + "</div>");
+          badgesHtml + detailHtml + freeTextHtml + rawTextHtml + notInRoadmapHtml + "</div>");
       });
       parts.push("</div></div>");
     });
@@ -943,6 +951,52 @@
       // when you later edit notes/tags/status elsewhere. Rebuild them here so they
       // reflect what's actually in the JSON being merged right now.
       var notesContent = htmlDoc.getElementById("workshop-notes-content");
+
+      // Recover notes for tasks the official export's OWN frozen Workshop Notes
+      // section already lists, but that have no matching .expandable-task-item in
+      // this same report's Implementation Roadmap. This reliably happens for
+      // Completed tasks: the roadmap only lists remaining work, but the report's
+      // pre-baked Workshop Notes still references them by ID + note text. Read
+      // this before we overwrite the section with our own rebuild, so those notes
+      // aren't lost just because there's no roadmap item to match them against.
+      var recoveredCount = 0;
+      if (notesContent) {
+        Array.prototype.forEach.call(notesContent.querySelectorAll(".notes-pillar"), function (pillarBlock) {
+          var header = pillarBlock.querySelector(".notes-pillar-header");
+          var pillarKey = header && header.getAttribute("data-notes-pillar");
+          if (!pillarKey) return;
+          Array.prototype.forEach.call(pillarBlock.querySelectorAll(".note-task-item"), function (item) {
+            var idEl = item.querySelector(".note-task-id");
+            if (!idEl) return;
+            var taskId = idEl.textContent.trim();
+            var key = pillarKey + "|" + taskId;
+            if (usedKeys[key]) return; // already have live data from a real roadmap match
+            var noteEl = item.querySelector(".note-task-note");
+            var rawNote = noteEl ? noteEl.textContent.trim() : "";
+            if (!rawNote) return;
+            var nameEl = item.querySelector(".note-task-name");
+            var parsed = ZTShared.parseNotes(rawNote);
+            var ov = overrides[key];
+            if (!notesByPillar[pillarKey]) notesByPillar[pillarKey] = [];
+            notesByPillar[pillarKey].push({
+              taskId: taskId,
+              title: nameEl ? nameEl.textContent.trim() : taskId,
+              status: ov ? ov.status : "",
+              priority: ov ? ov.priority : "",
+              teamPriority: parsed.teamPriority,
+              team: parsed.team,
+              featureNr: parsed.featureNr,
+              link: parsed.link,
+              tags: parsed.tags,
+              freeText: parsed.freeText,
+              raw: parsed.raw,
+              notInRoadmap: true
+            });
+            recoveredCount++;
+          });
+        });
+      }
+
       if (notesContent) {
         notesContent.innerHTML = buildWorkshopNotesHtml(notesByPillar);
       }
@@ -985,7 +1039,9 @@
       appendLog("Done — downloaded " + mergedFilename(reportFilename) + ".");
       appendLog("Matched " + matched + " of " + taskItems.length + " report tasks to overrides in " + configFilename + ".");
       appendLog("Workshop Notes: " + notesTotal + " task(s) with notes or tags found across " +
-        Object.keys(notesByPillar).length + " pillar(s) — compare this against the official tool's count.");
+        Object.keys(notesByPillar).length + " pillar(s) — compare this against the official tool's count." +
+        (recoveredCount ? " (" + recoveredCount + " of those have no matching Implementation Roadmap item — " +
+          "recovered from the report's own original Workshop Notes, typically Completed tasks.)" : ""));
       if (unmatched > 0) {
         appendLog(unmatched + " override(s) in the JSON had no matching task in this report " +
           "(different pillar/export scope?) and were skipped. By pillar: " +
