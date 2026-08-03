@@ -61,7 +61,12 @@
         featureNr: parts[3] || "",
         link: parts[4] || "",
         tags: tags,
-        freeText: parts.slice(5).join(" | ").trim()
+        freeText: parts.slice(5).join(" | ").trim(),
+        // Tag-stripped raw text, kept around so callers can tell a note apart from
+        // "truly nothing here" even when it's unfilled template junk (e.g. "Status |
+        // Prio (1-3) | | | ") that parses to no usable structured fields — the
+        // official tool still counts that as "has a note" since the field isn't blank.
+        raw: stripped
       };
     }
     return {
@@ -72,7 +77,8 @@
       featureNr: "",
       link: "",
       tags: tags,
-      freeText: stripped
+      freeText: stripped,
+      raw: stripped
     };
   }
 

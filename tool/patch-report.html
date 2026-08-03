@@ -588,8 +588,11 @@
   ].join("\n");
 
   // Formats a task's structured fields into the plain-text tooltip shown by the
-  // note icon. Falls back to freeText verbatim for tasks not using the pipe format.
-  function buildNoteTooltipText(teamPriority, team, featureNr, link, freeText) {
+  // note icon. Falls back to freeText verbatim for tasks not using the pipe format,
+  // and finally to the raw (tag-stripped) notes text so a task that only has
+  // unfilled template junk (e.g. "Status | Prio (1-3) | | | ") never gets an icon
+  // with a blank tooltip behind it.
+  function buildNoteTooltipText(teamPriority, team, featureNr, link, freeText, rawText) {
     if (teamPriority || team || featureNr || link) {
       var lines = [];
       if (teamPriority) lines.push("Team priority: " + teamPriority);
@@ -599,7 +602,7 @@
       if (freeText) lines.push(freeText);
       return lines.join("\n");
     }
-    return freeText || "";
+    return freeText || rawText || "";
   }
 
   // Rebuilds the Workshop Notes section entirely from the current JSON (tasks with a
@@ -635,6 +638,11 @@
         if (t.link) detailBits.push('<a href="' + escapeHtml(t.link) + '" target="_blank" rel="noopener">' + escapeHtml(t.link) + "</a>");
         var detailHtml = detailBits.length ? '<div class="note-task-note">' + detailBits.join(" &middot; ") + "</div>" : "";
         var freeTextHtml = t.freeText ? '<div class="note-task-note">' + escapeHtml(t.freeText) + "</div>" : "";
+        // Last-resort fallback: a note that's only unfilled template junk (e.g.
+        // "Status | Prio (1-3) | | | ") renders none of the above — show the raw
+        // text so the card isn't blank under a task the summary count says has a note.
+        var rawTextHtml = (!badges.length && !detailBits.length && !t.freeText && t.raw)
+          ? '<div class="note-task-note">' + escapeHtml(t.raw) + "</div>" : "";
         var attrs = ' data-task-id="' + escapeHtml(t.taskId) + '" data-status="' + escapeHtml(t.status) + '"' +
           (t.priority ? ' data-priority="' + escapeHtml(t.priority) + '"' : "") +
           (t.teamPriority ? ' data-team-priority="' + escapeHtml(t.teamPriority) + '"' : "") +
@@ -642,7 +650,7 @@
           ' data-tags="' + escapeHtml(t.tags.join(",")) + '"';
         parts.push('<div class="note-task-item"' + attrs + '><div class="note-task-header"><span class="note-task-id">' +
           escapeHtml(t.taskId) + '</span><span class="note-task-name">' + escapeHtml(t.title) + "</span></div>" +
-          badgesHtml + detailHtml + freeTextHtml + "</div>");
+          badgesHtml + detailHtml + freeTextHtml + rawTextHtml + "</div>");
       });
       parts.push("</div></div>");
     });
@@ -798,7 +806,8 @@
             featureNr: parsed.featureNr,
             link: parsed.link,
             tags: parsed.tags,
-            freeText: parsed.freeText
+            freeText: parsed.freeText,
+            raw: parsed.raw
           };
         });
       });
@@ -834,6 +843,7 @@
         var link = ov ? ov.link : "";
         var tags = ov ? ov.tags : [];
         var freeText = ov ? ov.freeText : "";
+        var raw = ov ? ov.raw : "";
 
         allStatuses[status] = true;
         if (priority) allPriorities[priority] = true; else hasNoPriority = true;
@@ -883,14 +893,18 @@
         var titleEl = item.querySelector(".expandable-task-title");
         var title = titleEl ? titleEl.textContent.trim() : taskId;
 
-        var hasNoteContent = !!(freeText || team || featureNr || link || teamPriority);
+        // "Has a note" mirrors the official tool: any non-blank notes text counts,
+        // even if it's unfilled template junk (e.g. "Status | Prio (1-3) | | | ")
+        // that parses to no usable structured fields — checking only the parsed
+        // sub-fields undercounts against the official tool's "N tasks with notes".
+        var hasNoteContent = !!(raw || tags.length);
 
         // The original report drives its hover-tooltip note icon off this same
         // data-note attribute + a .roadmap-note-icon span; keep both in sync with
         // the current JSON so newly-added/edited/cleared notes show up correctly.
         var existingNoteIcon = titleEl ? titleEl.querySelector(".roadmap-note-icon") : null;
         if (hasNoteContent) {
-          item.setAttribute("data-note", buildNoteTooltipText(teamPriority, team, featureNr, link, freeText));
+          item.setAttribute("data-note", buildNoteTooltipText(teamPriority, team, featureNr, link, freeText, raw));
           if (titleEl && !existingNoteIcon) {
             var noteIcon = htmlDoc.createElement("span");
             noteIcon.className = "roadmap-note-icon";
@@ -907,7 +921,7 @@
           notesByPillar[pillar].push({
             taskId: taskId, title: title, status: status, priority: priority,
             teamPriority: teamPriority, team: team,
-            featureNr: featureNr, link: link, tags: tags, freeText: freeText
+            featureNr: featureNr, link: link, tags: tags, freeText: freeText, raw: raw
           });
         }
         if (status === "blocked") {
@@ -917,6 +931,12 @@
 
       var totalOverrideKeys = Object.keys(overrides).length;
       var unmatched = totalOverrideKeys - Object.keys(usedKeys).length;
+      var unmatchedByPillar = {};
+      Object.keys(overrides).forEach(function (key) {
+        if (usedKeys[key]) return;
+        var pillarKey = key.split("|")[0];
+        unmatchedByPillar[pillarKey] = (unmatchedByPillar[pillarKey] || 0) + 1;
+      });
 
       // Workshop Notes and Top Risks are baked into the report as a snapshot of
       // whatever the JSON looked like at export time; they don't update themselves
@@ -960,11 +980,18 @@
       var finalHtml = "<!DOCTYPE html>\n" + htmlDoc.documentElement.outerHTML;
       downloadFile(finalHtml, mergedFilename(reportFilename));
 
+      var notesTotal = Object.keys(notesByPillar).reduce(function (sum, k) { return sum + notesByPillar[k].length; }, 0);
+
       appendLog("Done — downloaded " + mergedFilename(reportFilename) + ".");
       appendLog("Matched " + matched + " of " + taskItems.length + " report tasks to overrides in " + configFilename + ".");
+      appendLog("Workshop Notes: " + notesTotal + " task(s) with notes or tags found across " +
+        Object.keys(notesByPillar).length + " pillar(s) — compare this against the official tool's count.");
       if (unmatched > 0) {
         appendLog(unmatched + " override(s) in the JSON had no matching task in this report " +
-          "(different pillar/export scope?) and were skipped.");
+          "(different pillar/export scope?) and were skipped. By pillar: " +
+          Object.keys(unmatchedByPillar).sort().map(function (k) {
+            return k + " (" + unmatchedByPillar[k] + ")";
+          }).join(", ") + ".");
       }
     } catch (e) {
       appendLog("Something went wrong: " + e.message, true);
