@@ -79,9 +79,10 @@
   </section>
 
   <footer>
-    How this survives the round trip: team priority/team/feature number/link/tags are all parsed out of each task's
-    existing <code>notes</code> field using the <code>Status | Prio N | Team | FeatureNr | Link #tag</code> format
-    &mdash; a plain string the official importer already accepts. This patcher reads that JSON, matches each task by
+    How this survives the round trip: team priority/team/feature number/link/free text/tags are all parsed out of
+    each task's existing <code>notes</code> field using the
+    <code>Status | Prio N | Team | FeatureNr | Link | Free text #tag</code> format (the trailing free text field is
+    optional) &mdash; a plain string the official importer already accepts. This patcher reads that JSON, matches each task by
     its Task ID + pillar to the corresponding item in the report, and updates that item's status badge and adds
     priority/team/tag chips + a new filter bar. The report keeps a strict Content-Security-Policy (no
     <code>unsafe-inline</code> scripts); the injected filter logic is instead allowlisted by its exact SHA-256 hash,
@@ -217,12 +218,25 @@
     '.enhanced-filter-btn, .ztm-chip { border:1px solid #d7dbe0; background:#fff; color:#0a2540; border-radius:999px; padding:6px 16px; cursor:pointer; font-size:13px; font:inherit; }',
     '.enhanced-filter-btn.active, .ztm-chip.active { background:#0a2540; border-color:#0a2540; color:#fff; }',
     '.ztm-chip-status-blocked.active { background:#b54a00; border-color:#b54a00; }',
-    '.ztm-filter-row { display:flex; flex-wrap:wrap; gap:22px; }',
+    // -- our filter bar is pinned to the right and stays in view while scrolling, so',
+    // -- you can filter Workshop Notes without scrolling back to the top ----------',
+    '.ztm-filter-section { position:fixed; top:16px; right:16px; width:280px; max-height:calc(100vh - 32px); overflow-y:auto; z-index:500; margin:0; }',
+    '.ztm-filter-header { display:flex; align-items:center; justify-content:space-between; gap:10px; cursor:pointer; }',
+    '.ztm-filter-header .ztm-filter-heading { margin:0; }',
+    '.ztm-filter-header .expand-arrow { color:#8a95a1; font-size:11px; }',
+    '.ztm-filter-body { margin-top:12px; }',
+    '.ztm-filter-row { display:flex; flex-direction:column; gap:16px; }',
     '.ztm-filter-group h3 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:#5b6470; }',
-    '.ztm-toolbar { display:flex; justify-content:space-between; align-items:center; margin-top:14px; color:#5b6470; font-size:13px; }',
+    '.ztm-filter-section input[type="text"] { width:100%; }',
+    '.ztm-toolbar { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; margin-top:14px; color:#5b6470; font-size:13px; }',
     '.ztm-hint { color:#5b6470; font-size:12.5px; }',
     '#ztm-search { padding:6px 10px; border:1px solid #d7dbe0; border-radius:6px; font:inherit; }',
     '#ztm-clear { border:1px solid #d7dbe0; background:#fff; border-radius:6px; padding:6px 14px; cursor:pointer; font:inherit; }',
+    // -- on narrower viewports the fixed sidebar would overlap the report content, so',
+    // -- fall back to the original in-flow full-width card there -------------------',
+    '@media (max-width: 1000px) {',
+    '  .ztm-filter-section { position:static; top:auto; right:auto; width:auto; max-height:none; overflow-y:visible; z-index:auto; margin:14px 0; }',
+    '}',
 
     // -- section headings -------------------------------------------------------
     '.section-heading, .section-subtitle { font-size:19px; font-weight:700; color:#0a2540; margin:0 0 14px; display:flex; align-items:center; gap:8px; }',
@@ -249,6 +263,8 @@
     // -- individual tasks (this is what our status/priority/tag filter targets) --
     '.expandable-task-item { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:8px 6px; border-bottom:1px solid #f0f1f3; }',
     '.expandable-task-item.ztm-hidden { display:none; }',
+    '.note-task-item.ztm-hidden { display:none; }',
+    '.notes-task-count { color:#5b6470; font-weight:400; font-size:12.5px; }',
     '.expandable-task-title { flex:1 1 260px; font-size:13.5px; color:#1b1f24; }',
     '.expandable-task-details { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }',
     '.task-status-badge, .ztm-priority-badge, .ztm-tag-chip { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:600; white-space:nowrap; }',
@@ -317,6 +333,8 @@
     '  var tagFilter = new Set();',
     '  var searchBox = document.getElementById("ztm-search");',
     '  var items = Array.prototype.slice.call(document.querySelectorAll(".expandable-task-item[data-status]"));',
+    '  var noteItems = Array.prototype.slice.call(document.querySelectorAll(".note-task-item[data-task-id]"));',
+    '  var notesPillarBlocks = Array.prototype.slice.call(document.querySelectorAll(".notes-pillar"));',
     '  var summaryEl = document.getElementById("ztm-summary");',
     '',
     '  // Restore collapse/expand behavior for every accordion in the report (pillar',
@@ -336,7 +354,7 @@
     '      if (arrow) arrow.textContent = expanded ? "\\u25bc" : "\\u25b6";',
     '    }',
     '    header._ztmSetExpanded = setExpanded;',
-    '    setExpanded(false);',
+    '    setExpanded(header.getAttribute("aria-expanded") === "true");',
     '    header.addEventListener("click", function () {',
     '      setExpanded(header.getAttribute("aria-expanded") !== "true");',
     '    });',
@@ -437,6 +455,24 @@
     '    });',
     '  }',
     '',
+    '  // Mirrors updateRoadmapCounts() but for the Workshop Notes pillar groups: recomputes',
+    '  // each group\'s "N task(s)" / "V / N task(s)" count from what our status/priority/',
+    '  // team/tag filter bar currently leaves visible (i.e. not hidden by .ztm-hidden).',
+    '  function updateNotesCounts() {',
+    '    notesPillarBlocks.forEach(function (block) {',
+    '      var noteItemsInBlock = Array.prototype.slice.call(block.querySelectorAll(".note-task-item"));',
+    '      var visibleCount = 0;',
+    '      noteItemsInBlock.forEach(function (item) {',
+    '        if (!item.classList.contains("ztm-hidden")) visibleCount++;',
+    '      });',
+    '      var countEl = block.querySelector(".notes-task-count");',
+    '      if (!countEl) return;',
+    '      var total = noteItemsInBlock.length;',
+    '      var label = total === 1 ? "task" : "tasks";',
+    '      countEl.textContent = (visibleCount === total) ? (total + " " + label) : (visibleCount + " / " + total + " " + label);',
+    '    });',
+    '  }',
+    '',
     '  function applyPillarFilter(pillarKey) {',
     '    pillarBlocks.forEach(function (block) {',
     '      var sample = block.querySelector(".expandable-task-item[data-pillar]");',
@@ -470,43 +506,61 @@
     '    });',
     '  }',
     '',
+    '  // Shared by the roadmap task list and the Workshop Notes list — both carry the same',
+    '  // data-status/data-priority/data-team-priority/data-team/data-tags/data-task-id',
+    '  // attributes, so one predicate filters them identically.',
+    '  function matchesFilters(el, search) {',
+    '    var status = el.getAttribute("data-status") || "";',
+    '    var priority = el.getAttribute("data-priority") || "none";',
+    '    var teamPriority = el.getAttribute("data-team-priority") || "none";',
+    '    var team = el.getAttribute("data-team") || "";',
+    '    var tags = (el.getAttribute("data-tags") || "").split(",").filter(Boolean);',
+    '    var taskId = el.getAttribute("data-task-id") || "";',
+    '    if (statusFilter.size && !statusFilter.has(status)) return false;',
+    '    if (priorityFilter.size && !priorityFilter.has(priority)) return false;',
+    '    if (teamPriorityFilter.size && !teamPriorityFilter.has(teamPriority)) return false;',
+    '    if (teamFilter.size && !teamFilter.has(team)) return false;',
+    '    if (tagFilter.size && !tags.some(function (t) { return tagFilter.has(t); })) return false;',
+    '    if (search && taskId.toLowerCase().indexOf(search) === -1) return false;',
+    '    return true;',
+    '  }',
+    '',
     '  function applyFilters() {',
     '    var search = ((searchBox && searchBox.value) || "").trim().toLowerCase();',
     '    var visible = 0;',
     '    items.forEach(function (item) {',
-    '      var status = item.getAttribute("data-status") || "";',
-    '      var priority = item.getAttribute("data-priority") || "none";',
-    '      var teamPriority = item.getAttribute("data-team-priority") || "none";',
-    '      var team = item.getAttribute("data-team") || "";',
-    '      var tags = (item.getAttribute("data-tags") || "").split(",").filter(Boolean);',
-    '      var taskId = item.getAttribute("data-task-id") || "";',
-    '      var ok = true;',
-    '      if (statusFilter.size && !statusFilter.has(status)) ok = false;',
-    '      if (ok && priorityFilter.size && !priorityFilter.has(priority)) ok = false;',
-    '      if (ok && teamPriorityFilter.size && !teamPriorityFilter.has(teamPriority)) ok = false;',
-    '      if (ok && teamFilter.size && !teamFilter.has(team)) ok = false;',
-    '      if (ok && tagFilter.size && !tags.some(function (t) { return tagFilter.has(t); })) ok = false;',
-    '      if (ok && search && taskId.toLowerCase().indexOf(search) === -1) ok = false;',
+    '      var ok = matchesFilters(item, search);',
     '      item.classList.toggle("ztm-hidden", !ok);',
     '      if (ok) visible++;',
     '    });',
-    '    if (summaryEl) summaryEl.textContent = "Showing " + visible + " of " + items.length + " tasks";',
+    '    var visibleNotes = 0;',
+    '    noteItems.forEach(function (item) {',
+    '      var ok = matchesFilters(item, search);',
+    '      item.classList.toggle("ztm-hidden", !ok);',
+    '      if (ok) visibleNotes++;',
+    '    });',
+    '    if (summaryEl) {',
+    '      var summary = "Showing " + visible + " of " + items.length + " tasks";',
+    '      if (noteItems.length) summary += " \\u00b7 " + visibleNotes + " of " + noteItems.length + " notes";',
+    '      summaryEl.textContent = summary;',
+    '    }',
     '',
-    '    // Auto-expand pillar sections that contain a match so filtered results are',
+    '    // Auto-expand pillar/notes sections that contain a match so filtered results are',
     '    // actually visible; collapse back to the original look once filters clear.',
     '    var filtersActive = !!(statusFilter.size || priorityFilter.size || teamPriorityFilter.size ||',
     '      teamFilter.size || tagFilter.size || search);',
-    '    Array.prototype.slice.call(document.querySelectorAll(".pillar-tasks")).forEach(function (block) {',
+    '    Array.prototype.slice.call(document.querySelectorAll(".pillar-tasks, .notes-pillar-tasks")).forEach(function (block) {',
     '      var header = document.querySelector(\'[aria-controls="\' + block.id + \'"]\');',
     '      if (!header || !header._ztmSetExpanded) return;',
     '      if (!filtersActive) { header._ztmSetExpanded(false); return; }',
-    '      var hasVisible = Array.prototype.some.call(block.querySelectorAll(".expandable-task-item"), function (item) {',
+    '      var hasVisible = Array.prototype.some.call(block.querySelectorAll(".expandable-task-item, .note-task-item"), function (item) {',
     '        return !item.classList.contains("ztm-hidden");',
     '      });',
     '      header._ztmSetExpanded(hasVisible);',
     '    });',
     '',
     '    updateRoadmapCounts();',
+    '    updateNotesCounts();',
     '  }',
     '',
     '  wireChips("ztm-status-chips", statusFilter);',
@@ -542,6 +596,7 @@
       if (team) lines.push("Team: " + team);
       if (featureNr) lines.push("Feature #: " + featureNr);
       if (link) lines.push("Link: " + link);
+      if (freeText) lines.push(freeText);
       return lines.join("\n");
     }
     return freeText || "";
@@ -565,8 +620,9 @@
       var sectionId = "ztm-notes-" + pillarKey;
       parts.push('<div class="notes-pillar"><div class="notes-pillar-header" role="button" tabindex="0" ' +
         'aria-expanded="false" aria-controls="' + sectionId + '"><strong>' +
-        escapeHtml(ZTShared.labelize(pillarKey)) + "</strong> (" + tasks.length + " task" +
-        (tasks.length === 1 ? "" : "s") + ')<span class="notes-expand-arrow" aria-hidden="true">▶</span></div>' +
+        escapeHtml(ZTShared.labelize(pillarKey)) + '</strong> (<span class="notes-task-count">' + tasks.length +
+        " task" + (tasks.length === 1 ? "" : "s") +
+        '</span>)<span class="notes-expand-arrow" aria-hidden="true">▶</span></div>' +
         '<div class="notes-pillar-tasks" id="' + sectionId + '">');
       tasks.forEach(function (t) {
         var badges = [];
@@ -579,7 +635,12 @@
         if (t.link) detailBits.push('<a href="' + escapeHtml(t.link) + '" target="_blank" rel="noopener">' + escapeHtml(t.link) + "</a>");
         var detailHtml = detailBits.length ? '<div class="note-task-note">' + detailBits.join(" &middot; ") + "</div>" : "";
         var freeTextHtml = t.freeText ? '<div class="note-task-note">' + escapeHtml(t.freeText) + "</div>" : "";
-        parts.push('<div class="note-task-item"><div class="note-task-header"><span class="note-task-id">' +
+        var attrs = ' data-task-id="' + escapeHtml(t.taskId) + '" data-status="' + escapeHtml(t.status) + '"' +
+          (t.priority ? ' data-priority="' + escapeHtml(t.priority) + '"' : "") +
+          (t.teamPriority ? ' data-team-priority="' + escapeHtml(t.teamPriority) + '"' : "") +
+          (t.team ? ' data-team="' + escapeHtml(t.team) + '"' : "") +
+          ' data-tags="' + escapeHtml(t.tags.join(",")) + '"';
+        parts.push('<div class="note-task-item"' + attrs + '><div class="note-task-header"><span class="note-task-id">' +
           escapeHtml(t.taskId) + '</span><span class="note-task-name">' + escapeHtml(t.title) + "</span></div>" +
           badgesHtml + detailHtml + freeTextHtml + "</div>");
       });
@@ -643,16 +704,21 @@
 
     return [
       '<section class="ztm-filter-section" aria-labelledby="ztm-filter-heading" data-ztm-injected="1">',
-      '  <h2 id="ztm-filter-heading" class="ztm-filter-heading">Team filters &amp; tags</h2>',
-      '  <div class="ztm-filter-row">',
-      '    <div class="ztm-filter-group"><h3>Status</h3><div class="ztm-chip-group" id="ztm-status-chips">' + statusChips + "</div></div>",
-      '    <div class="ztm-filter-group"><h3>Priority</h3><div class="ztm-chip-group" id="ztm-priority-chips">' + priorityChips + "</div></div>",
-      '    <div class="ztm-filter-group"><h3>Team priority</h3><div class="ztm-chip-group" id="ztm-team-priority-chips">' + teamPriorityChips + "</div></div>",
-      '    <div class="ztm-filter-group"><h3>Team</h3><div class="ztm-chip-group" id="ztm-team-chips">' + teamChips + "</div></div>",
-      '    <div class="ztm-filter-group" style="flex:1; min-width:220px;"><h3>Tags</h3><div class="ztm-chip-group" id="ztm-tag-chips">' + tagChips + "</div></div>",
-      '    <div class="ztm-filter-group"><h3>Task ID search</h3><input type="text" id="ztm-search" placeholder="e.g. RMI_"></div>',
+      '  <div class="ztm-filter-header" role="button" tabindex="0" aria-expanded="true" aria-controls="ztm-filter-body">',
+      '    <h2 id="ztm-filter-heading" class="ztm-filter-heading">Team filters &amp; tags</h2>',
+      '    <span class="expand-arrow" aria-hidden="true">▼</span>',
+      '  </div>',
+      '  <div class="ztm-filter-body" id="ztm-filter-body">',
+      '    <div class="ztm-filter-row">',
+      '      <div class="ztm-filter-group"><h3>Status</h3><div class="ztm-chip-group" id="ztm-status-chips">' + statusChips + "</div></div>",
+      '      <div class="ztm-filter-group"><h3>Priority</h3><div class="ztm-chip-group" id="ztm-priority-chips">' + priorityChips + "</div></div>",
+      '      <div class="ztm-filter-group"><h3>Team priority</h3><div class="ztm-chip-group" id="ztm-team-priority-chips">' + teamPriorityChips + "</div></div>",
+      '      <div class="ztm-filter-group"><h3>Team</h3><div class="ztm-chip-group" id="ztm-team-chips">' + teamChips + "</div></div>",
+      '      <div class="ztm-filter-group"><h3>Tags</h3><div class="ztm-chip-group" id="ztm-tag-chips">' + tagChips + "</div></div>",
+      '      <div class="ztm-filter-group"><h3>Task ID search</h3><input type="text" id="ztm-search" placeholder="e.g. RMI_"></div>',
+      "    </div>",
+      '    <div class="ztm-toolbar"><div id="ztm-summary"></div><button type="button" id="ztm-clear">Clear filters</button></div>',
       "  </div>",
-      '  <div class="ztm-toolbar"><div id="ztm-summary"></div><button type="button" id="ztm-clear">Clear filters</button></div>',
       "</section>"
     ].join("\n");
   }
@@ -839,7 +905,8 @@
         if (hasNoteContent || tags.length) {
           if (!notesByPillar[pillar]) notesByPillar[pillar] = [];
           notesByPillar[pillar].push({
-            taskId: taskId, title: title, teamPriority: teamPriority, team: team,
+            taskId: taskId, title: title, status: status, priority: priority,
+            teamPriority: teamPriority, team: team,
             featureNr: featureNr, link: link, tags: tags, freeText: freeText
           });
         }

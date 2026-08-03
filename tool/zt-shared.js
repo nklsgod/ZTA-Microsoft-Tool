@@ -27,8 +27,9 @@
   }
 
   // The team's existing convention, already in use before this tool existed:
-  //   <legend> | Prio <1-3> | <Team> | <FeatureNr> | <Link> #tag1 #tag2
-  // e.g. "Status | Prio 3 | SAM2 | xyz123 | https://test.com #1337"
+  //   <legend> | Prio <1-3> | <Team> | <FeatureNr> | <Link> | <Free text> #tag1 #tag2
+  // e.g. "Status | Prio 3 | SAM2 | xyz123 | https://test.com | some note #1337"
+  // The trailing "Free text" field is optional — omit it (and its preceding "|") when unused.
   //
   // "Prio 1-3" here is a team-only scale, independent of the official "priority"
   // (P0-P3) field elsewhere in the task override — the two are unrelated on purpose.
@@ -60,7 +61,7 @@
         featureNr: parts[3] || "",
         link: parts[4] || "",
         tags: tags,
-        freeText: ""
+        freeText: parts.slice(5).join(" | ").trim()
       };
     }
     return {
@@ -82,7 +83,9 @@
     if (fields.structured) {
       var legend = fields.legend || "Status";
       var prio = "Prio " + (fields.teamPriority || "");
-      return [legend, prio, fields.team || "", fields.featureNr || "", fields.link || ""].join(" | ") + tagsSuffix;
+      var parts = [legend, prio, fields.team || "", fields.featureNr || "", fields.link || ""];
+      if (fields.freeText) parts.push(fields.freeText);
+      return parts.join(" | ") + tagsSuffix;
     }
     return (fields.freeText || "") + tagsSuffix;
   }
