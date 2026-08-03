@@ -938,6 +938,43 @@
         unmatchedByPillar[pillarKey] = (unmatchedByPillar[pillarKey] || 0) + 1;
       });
 
+      // --- [debug branch] diagnose *why* each unmatched override failed to match,
+      // without changing any actual matching behavior. Buckets each miss into:
+      //   - a taskId formatting difference (same ID, different punctuation/case —
+      //     e.g. JSON "DEV-008" vs report "DEV_008")
+      //   - a pillar key that doesn't exist anywhere in this report at all
+      //   - genuinely absent (no close match found by either heuristic)
+      function normalizeId(id) {
+        return String(id || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      }
+      var reportPillars = {};
+      var reportTaskIdsByNormalized = {};
+      taskItems.forEach(function (item) {
+        var p = item.getAttribute("data-pillar");
+        var t = item.getAttribute("data-task-id");
+        reportPillars[p] = true;
+        reportTaskIdsByNormalized[p + "|" + normalizeId(t)] = t;
+      });
+      var nearMatches = [];
+      var missingPillars = {};
+      var trulyMissing = [];
+      Object.keys(overrides).forEach(function (key) {
+        if (usedKeys[key]) return;
+        var idx = key.indexOf("|");
+        var pillarKey = key.slice(0, idx);
+        var taskId = key.slice(idx + 1);
+        if (!reportPillars[pillarKey]) {
+          missingPillars[pillarKey] = (missingPillars[pillarKey] || 0) + 1;
+          return;
+        }
+        var candidate = reportTaskIdsByNormalized[pillarKey + "|" + normalizeId(taskId)];
+        if (candidate && candidate !== taskId) {
+          nearMatches.push(pillarKey + ": JSON has \"" + taskId + "\", report has \"" + candidate + "\"");
+        } else {
+          trulyMissing.push(pillarKey + "|" + taskId);
+        }
+      });
+
       // Workshop Notes and Top Risks are baked into the report as a snapshot of
       // whatever the JSON looked like at export time; they don't update themselves
       // when you later edit notes/tags/status elsewhere. Rebuild them here so they
@@ -992,6 +1029,26 @@
           Object.keys(unmatchedByPillar).sort().map(function (k) {
             return k + " (" + unmatchedByPillar[k] + ")";
           }).join(", ") + ".");
+
+        if (nearMatches.length) {
+          appendLog("[debug] " + nearMatches.length + " of those look like a taskId FORMATTING " +
+            "mismatch (same ID, different punctuation/case):");
+          nearMatches.slice(0, 25).forEach(function (m) { appendLog("  - " + m); });
+          if (nearMatches.length > 25) appendLog("  ...and " + (nearMatches.length - 25) + " more.");
+        }
+        if (Object.keys(missingPillars).length) {
+          appendLog("[debug] These JSON pillar keys don't exist anywhere in this report at all " +
+            "(wrong key, or this report export doesn't cover that pillar): " +
+            Object.keys(missingPillars).sort().map(function (k) {
+              return k + " (" + missingPillars[k] + ")";
+            }).join(", ") + ".");
+        }
+        if (trulyMissing.length) {
+          appendLog("[debug] " + trulyMissing.length + " override(s) have no close match at all " +
+            "(task genuinely not present in this report export):");
+          trulyMissing.slice(0, 25).forEach(function (k) { appendLog("  - " + k); });
+          if (trulyMissing.length > 25) appendLog("  ...and " + (trulyMissing.length - 25) + " more.");
+        }
       }
     } catch (e) {
       appendLog("Something went wrong: " + e.message, true);
