@@ -332,6 +332,7 @@
     '  var teamPriorityFilter = new Set();',
     '  var teamFilter = new Set();',
     '  var tagFilter = new Set();',
+    '  var legendFilter = new Set();',
     '  var searchBox = document.getElementById("ztm-search");',
     '  var items = Array.prototype.slice.call(document.querySelectorAll(".expandable-task-item[data-status]"));',
     '  var noteItems = Array.prototype.slice.call(document.querySelectorAll(".note-task-item[data-task-id]"));',
@@ -515,12 +516,14 @@
     '    var priority = el.getAttribute("data-priority") || "none";',
     '    var teamPriority = el.getAttribute("data-team-priority") || "none";',
     '    var team = el.getAttribute("data-team") || "";',
+    '    var legend = el.getAttribute("data-legend") || "";',
     '    var tags = (el.getAttribute("data-tags") || "").split(",").filter(Boolean);',
     '    var taskId = el.getAttribute("data-task-id") || "";',
     '    if (statusFilter.size && !statusFilter.has(status)) return false;',
     '    if (priorityFilter.size && !priorityFilter.has(priority)) return false;',
     '    if (teamPriorityFilter.size && !teamPriorityFilter.has(teamPriority)) return false;',
     '    if (teamFilter.size && !teamFilter.has(team)) return false;',
+    '    if (legendFilter.size && !legendFilter.has(legend)) return false;',
     '    if (tagFilter.size && !tags.some(function (t) { return tagFilter.has(t); })) return false;',
     '    if (search && taskId.toLowerCase().indexOf(search) === -1) return false;',
     '    return true;',
@@ -549,7 +552,7 @@
     '    // Auto-expand pillar/notes sections that contain a match so filtered results are',
     '    // actually visible; collapse back to the original look once filters clear.',
     '    var filtersActive = !!(statusFilter.size || priorityFilter.size || teamPriorityFilter.size ||',
-    '      teamFilter.size || tagFilter.size || search);',
+    '      teamFilter.size || legendFilter.size || tagFilter.size || search);',
     '    Array.prototype.slice.call(document.querySelectorAll(".pillar-tasks, .notes-pillar-tasks")).forEach(function (block) {',
     '      var header = document.querySelector(\'[aria-controls="\' + block.id + \'"]\');',
     '      if (!header || !header._ztmSetExpanded) return;',
@@ -568,14 +571,15 @@
     '  wireChips("ztm-priority-chips", priorityFilter);',
     '  wireChips("ztm-team-priority-chips", teamPriorityFilter);',
     '  wireChips("ztm-team-chips", teamFilter);',
+    '  wireChips("ztm-legend-chips", legendFilter);',
     '  wireChips("ztm-tag-chips", tagFilter);',
     '  if (searchBox) searchBox.addEventListener("input", applyFilters);',
     '  var clearBtn = document.getElementById("ztm-clear");',
     '  if (clearBtn) {',
     '    clearBtn.addEventListener("click", function () {',
-    '      statusFilter.clear(); priorityFilter.clear(); teamPriorityFilter.clear(); teamFilter.clear(); tagFilter.clear();',
+    '      statusFilter.clear(); priorityFilter.clear(); teamPriorityFilter.clear(); teamFilter.clear(); tagFilter.clear(); legendFilter.clear();',
     '      if (searchBox) searchBox.value = "";',
-    '      var chipContainerIds = ["ztm-status-chips", "ztm-priority-chips", "ztm-team-priority-chips", "ztm-team-chips", "ztm-tag-chips"];',
+    '      var chipContainerIds = ["ztm-status-chips", "ztm-priority-chips", "ztm-team-priority-chips", "ztm-team-chips", "ztm-legend-chips", "ztm-tag-chips"];',
     '      chipContainerIds.forEach(function (id) {',
     '        var container = document.getElementById(id);',
     '        if (!container) return;',
@@ -659,10 +663,12 @@
         // text so the card isn't blank under a task the summary count says has a note.
         var rawTextHtml = (!badges.length && !detailBits.length && !t.freeText && t.raw)
           ? '<div class="note-task-note">' + escapeHtml(t.raw) + "</div>" : "";
+        var legendForFilter = (t.legend && t.legend.toLowerCase() !== "status") ? t.legend : "";
         var attrs = ' data-task-id="' + escapeHtml(t.taskId) + '" data-status="' + escapeHtml(t.status) + '"' +
           (t.priority ? ' data-priority="' + escapeHtml(t.priority) + '"' : "") +
           (t.teamPriority ? ' data-team-priority="' + escapeHtml(t.teamPriority) + '"' : "") +
           (t.team ? ' data-team="' + escapeHtml(t.team) + '"' : "") +
+          (legendForFilter ? ' data-legend="' + escapeHtml(legendForFilter) + '"' : "") +
           ' data-tags="' + escapeHtml(t.tags.join(",")) + '"';
         parts.push('<div class="note-task-item"' + attrs + '><div class="note-task-header"><span class="note-task-id">' +
           escapeHtml(t.taskId) + '</span><span class="note-task-name">' + escapeHtml(t.title) + "</span></div>" +
@@ -704,7 +710,7 @@
     ].join("\n");
   }
 
-  function buildFilterBarHtml(statuses, priorities, hasNoPriority, teamPriorities, hasNoTeamPriority, teams, tags) {
+  function buildFilterBarHtml(statuses, priorities, hasNoPriority, teamPriorities, hasNoTeamPriority, teams, tags, legends) {
     function chip(value, label, extraClass) {
       return '<button type="button" class="ztm-chip' + (extraClass ? " " + extraClass : "") +
         '" data-value="' + escapeHtml(value) + '">' + escapeHtml(label) + "</button>";
@@ -725,6 +731,8 @@
       '<span class="ztm-hint">No teams yet</span>';
     var tagChips = tags.map(function (t) { return chip(t, t); }).join("") ||
       '<span class="ztm-hint">No tags yet</span>';
+    var legendChips = legends.map(function (l) { return chip(l, l); }).join("") ||
+      '<span class="ztm-hint">No categories yet</span>';
 
     return [
       '<section class="ztm-filter-section" aria-labelledby="ztm-filter-heading" data-ztm-injected="1">',
@@ -738,6 +746,7 @@
       '      <div class="ztm-filter-group"><h3>Priority</h3><div class="ztm-chip-group" id="ztm-priority-chips">' + priorityChips + "</div></div>",
       '      <div class="ztm-filter-group"><h3>Team priority</h3><div class="ztm-chip-group" id="ztm-team-priority-chips">' + teamPriorityChips + "</div></div>",
       '      <div class="ztm-filter-group"><h3>Team</h3><div class="ztm-chip-group" id="ztm-team-chips">' + teamChips + "</div></div>",
+      '      <div class="ztm-filter-group"><h3>Category</h3><div class="ztm-chip-group" id="ztm-legend-chips">' + legendChips + "</div></div>",
       '      <div class="ztm-filter-group"><h3>Tags</h3><div class="ztm-chip-group" id="ztm-tag-chips">' + tagChips + "</div></div>",
       '      <div class="ztm-filter-group"><h3>Task ID search</h3><input type="text" id="ztm-search" placeholder="e.g. RMI_"></div>',
       "    </div>",
@@ -831,7 +840,7 @@
 
       var usedKeys = {};
       var matched = 0;
-      var allStatuses = {}, allPriorities = {}, allTeamPriorities = {}, allTeams = {}, allTags = {};
+      var allStatuses = {}, allPriorities = {}, allTeamPriorities = {}, allTeams = {}, allTags = {}, allLegends = {};
       var hasNoPriority = false, hasNoTeamPriority = false;
       var notesByPillar = {};
       var blockedTasks = [];
@@ -863,16 +872,22 @@
         var freeText = ov ? ov.freeText : "";
         var raw = ov ? ov.raw : "";
 
+        // Same "Status" placeholder exclusion as the legend badge below (line ~638) —
+        // the generic header text some notes still carry isn't a real category.
+        var legendForFilter = (legend && legend.toLowerCase() !== "status") ? legend : "";
+
         allStatuses[status] = true;
         if (priority) allPriorities[priority] = true; else hasNoPriority = true;
         if (teamPriority) allTeamPriorities[teamPriority] = true; else hasNoTeamPriority = true;
         if (team) allTeams[team] = true;
         tags.forEach(function (t) { allTags[t] = true; });
+        if (legendForFilter) allLegends[legendForFilter] = true;
 
         item.setAttribute("data-status", status);
         if (priority) item.setAttribute("data-priority", priority); else item.removeAttribute("data-priority");
         if (teamPriority) item.setAttribute("data-team-priority", teamPriority); else item.removeAttribute("data-team-priority");
         if (team) item.setAttribute("data-team", team); else item.removeAttribute("data-team");
+        if (legendForFilter) item.setAttribute("data-legend", legendForFilter); else item.removeAttribute("data-legend");
         item.setAttribute("data-tags", tags.join(","));
 
         if (badge) {
@@ -1030,7 +1045,8 @@
         Object.keys(allTeamPriorities).sort(),
         hasNoTeamPriority,
         Object.keys(allTeams).sort(),
-        Object.keys(allTags).sort()
+        Object.keys(allTags).sort(),
+        Object.keys(allLegends).sort()
       );
       pillarFilterSection.insertAdjacentHTML("afterend", filterBarHtml);
       htmlDoc.body.setAttribute("data-ztm-patched", "1");
