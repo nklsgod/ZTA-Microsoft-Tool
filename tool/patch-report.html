@@ -655,9 +655,9 @@
         var badgesHtml = badges.length ? '<div>' + badges.join(" ") + "</div>" : "";
         var detailBits = [];
         if (t.featureNr) {
-          detailBits.push(ZTShared.looksLikeUrl(t.featureNr)
+          detailBits.push("Feature: " + (ZTShared.looksLikeUrl(t.featureNr)
             ? '<a href="' + escapeHtml(t.featureNr) + '" target="_blank" rel="noopener">' + escapeHtml(t.featureNr) + "</a>"
-            : "Feature #" + escapeHtml(t.featureNr));
+            : escapeHtml(t.featureNr)));
         }
         if (t.link) detailBits.push('<a href="' + escapeHtml(t.link) + '" target="_blank" rel="noopener">' + escapeHtml(t.link) + "</a>");
         var detailHtml = detailBits.length ? '<div class="note-task-note">' + detailBits.join(" &middot; ") + "</div>" : "";
