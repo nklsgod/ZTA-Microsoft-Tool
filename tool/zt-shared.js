@@ -82,6 +82,10 @@
     };
   }
 
+  function looksLikeUrl(value) {
+    return /^https?:\/\//i.test(String(value || "").trim());
+  }
+
   function composeNotes(fields) {
     var tagsSuffix = (fields.tags && fields.tags.length)
       ? " " + fields.tags.map(function (t) { return "#" + t; }).join(" ")
@@ -105,6 +109,7 @@
     nowIso: nowIso,
     filenameTimestamp: filenameTimestamp,
     parseNotes: parseNotes,
-    composeNotes: composeNotes
+    composeNotes: composeNotes,
+    looksLikeUrl: looksLikeUrl
   };
 })(window);

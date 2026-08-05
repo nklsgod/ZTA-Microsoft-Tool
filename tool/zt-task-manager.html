@@ -273,6 +273,7 @@
   var filenameTimestamp = ZTShared.filenameTimestamp;
   var parseNotes = ZTShared.parseNotes;
   var composeNotes = ZTShared.composeNotes;
+  var looksLikeUrl = ZTShared.looksLikeUrl;
 
   var doc = null;          // the full parsed JSON document, mutated in place as the user edits
   var rows = [];           // flattened view, see loadRowsFromDoc()
@@ -605,23 +606,26 @@
       touch(row);
       renderTable();
     }));
+    if (looksLikeUrl(row.featureNr)) cell.appendChild(buildOpenLink(row.featureNr));
+
     cell.appendChild(buildTeamField("Link", row.link, null, function (val) {
       row.link = val;
       touch(row);
       renderTable();
     }));
-
-    if (row.link) {
-      var open = document.createElement("a");
-      open.className = "link-open";
-      open.href = row.link;
-      open.target = "_blank";
-      open.rel = "noopener";
-      open.textContent = "Open ↗";
-      cell.appendChild(open);
-    }
+    if (looksLikeUrl(row.link)) cell.appendChild(buildOpenLink(row.link));
 
     return cell;
+  }
+
+  function buildOpenLink(url) {
+    var open = document.createElement("a");
+    open.className = "link-open";
+    open.href = url;
+    open.target = "_blank";
+    open.rel = "noopener";
+    open.textContent = "Open ↗";
+    return open;
   }
 
   function buildNotesCell(row) {
