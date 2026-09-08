@@ -16,32 +16,47 @@ let Inventory =
             tostring(column_ifexists("AgentName", "")),
             "Unknown agent"),
         DeviceKey = tolower(
-            tostring(RawAgentInfo.localAgentMetadata.deviceName))
+            tostring(RawAgentInfo.localAgentMetadata.deviceName)),
+        AutoApprove = tolower(
+            tostring(RawAgentInfo.localAgentMetadata.autoApprove))
     | join kind=leftouter DeviceGroups on DeviceKey
-    | extend DeviceGroup = iff(
-        isempty(DeviceGroup), "Not mapped", DeviceGroup)
-    | summarize ProfilesOnDevice = count(),
-                FirstRecord = min(FirstRecord)
+    | extend DeviceGroup =
+        iff(isempty(DeviceGroup), "Not mapped", DeviceGroup)
+    | summarize
+        ProfilesOnDevice = count(),
+        ApproveEnabled = countif(AutoApprove == "true"),
+        ApproveDisabled = countif(AutoApprove == "false"),
+        ApproveUnknown = countif(AutoApprove !in ("true", "false")),
+        FirstRecord = min(FirstRecord)
         by Agent, DeviceGroup, DeviceKey;
 let Details =
     Inventory
     | summarize
         DeviceCount = countif(isnotempty(DeviceKey)),
         AgentProfiles = sum(ProfilesOnDevice),
+        AutoApproveEnabled = sum(ApproveEnabled),
+        AutoApproveDisabled = sum(ApproveDisabled),
+        AutoApproveUnknown = sum(ApproveUnknown),
         FirstRecord = min(FirstRecord)
         by Agent, DeviceGroup
     | extend SortOrder = 0;
 let Total =
     Inventory
-    | summarize ProfilesOnDevice = sum(ProfilesOnDevice),
-                FirstRecord = min(FirstRecord) by DeviceKey
+    | summarize
+        ProfilesOnDevice = sum(ProfilesOnDevice),
+        ApproveEnabled = sum(ApproveEnabled),
+        ApproveDisabled = sum(ApproveDisabled),
+        ApproveUnknown = sum(ApproveUnknown),
+        FirstRecord = min(FirstRecord)
+        by DeviceKey
     | summarize
         DeviceCount = countif(isnotempty(DeviceKey)),
         AgentProfiles = sum(ProfilesOnDevice),
+        AutoApproveEnabled = sum(ApproveEnabled),
+        AutoApproveDisabled = sum(ApproveDisabled),
+        AutoApproveUnknown = sum(ApproveUnknown),
         FirstRecord = min(FirstRecord)
-    | extend Agent = "TOTAL",
-             DeviceGroup = "All groups",
-             SortOrder = 1;
+    | extend Agent = "TOTAL", DeviceGroup = "All groups", SortOrder = 1;
 union Details, Total
 | order by SortOrder asc, Agent asc, DeviceCount desc
 | project
@@ -49,4 +64,7 @@ union Details, Total
     DeviceGroup,
     DeviceCount,
     AgentProfiles,
+    AutoApproveEnabled,
+    AutoApproveDisabled,
+    AutoApproveUnknown,
     FirstObservedMonth = format_datetime(FirstRecord, "yyyy-MM")
